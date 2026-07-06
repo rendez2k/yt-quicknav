@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body {
+        width: 240px;
+        margin: 0;
+        padding: 14px 16px;
+        font-family: "Roboto", "Segoe UI", Arial, sans-serif;
+        font-size: 14px;
+        color: #0f0f0f;
+        background: #fff;
+      }
+      h1 {
+        font-size: 15px;
+        margin: 0 0 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px 0;
+      }
+      .row label { cursor: pointer; }
+      hr { border: none; border-top: 1px solid #eee; margin: 8px 0; }
+      .hint { color: #666; font-size: 12px; margin-top: 10px; line-height: 1.4; }
+      input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+      .section-title { font-weight: 600; margin: 6px 0 2px; }
+      .sub { padding-left: 14px; }
+      input[type="text"], input[type="password"], input[type="number"] {
+        width: 120px; font-size: 12px; padding: 3px 5px;
+        border: 1px solid #ccc; border-radius: 5px;
+      }
+      input[type="number"] { width: 48px; }
+    </style>
+  </head>
+  <body>
+    <h1>⚙️ Quick Nav + Cinema</h1>
+
+    <div class="row">
+      <label for="cinemaMode">🎬 Cinema mode</label>
+      <input type="checkbox" id="cinemaMode" />
+    </div>
+
+    <hr />
+
+    <div class="row">
+      <label for="showHistory">🕘 History</label>
+      <input type="checkbox" id="showHistory" />
+    </div>
+    <div class="row">
+      <label for="showWatchLater">🕒 Watch Later</label>
+      <input type="checkbox" id="showWatchLater" />
+    </div>
+    <div class="row">
+      <label for="showSubscriptions">📺 Subscriptions</label>
+      <input type="checkbox" id="showSubscriptions" />
+    </div>
+    <div class="row">
+      <label for="showLiked">👍 Liked</label>
+      <input type="checkbox" id="showLiked" />
+    </div>
+    <div class="row">
+      <label for="showLibrary">📚 Library</label>
+      <input type="checkbox" id="showLibrary" />
+    </div>
+    <div class="row">
+      <label for="showLike">👍 Like (toggle)</label>
+      <input type="checkbox" id="showLike" />
+    </div>
+    <div class="row">
+      <label for="showToggle">🔁 Watch Later: toggle</label>
+      <input type="checkbox" id="showToggle" />
+    </div>
+    <div class="row">
+      <label for="showCut">✂️ Auto-Cut (button)</label>
+      <input type="checkbox" id="showCut" />
+    </div>
+
+    <hr />
+    <div class="section-title">✂️ Auto-Cut</div>
+
+    <div class="row">
+      <label for="autoCut">Enable Auto-Cut</label>
+      <input type="checkbox" id="autoCut" />
+    </div>
+    <div class="row sub">
+      <label for="cutMessaging">Skip messaging (SponsorBlock)</label>
+      <input type="checkbox" id="cutMessaging" />
+    </div>
+    <div class="row sub">
+      <label for="cutBoring">Trim dull parts (most replayed)</label>
+      <input type="checkbox" id="cutBoring" />
+    </div>
+    <div class="row sub">
+      <label for="aiHighlights">AI highlights (Claude)</label>
+      <input type="checkbox" id="aiHighlights" />
+    </div>
+    <div class="row sub">
+      <label for="anthropicKey">Anthropic API key</label>
+      <input type="password" id="anthropicKey" placeholder="sk-ant-…" />
+    </div>
+    <div class="row sub">
+      <label for="speedRate">Speed-through rate</label>
+      <input type="number" id="speedRate" min="1.25" max="4" step="0.25" />
+    </div>
+
+    <hr />
+    <div class="row">
+      <label for="debug">🐞 Debug logging (console)</label>
+      <input type="checkbox" id="debug" />
+    </div>
+
+    <div class="hint">
+      Auto-Cut skips sponsors/subscribe reminders and speeds through the dull
+      parts. Toggle it per video with the ✂️ button, or leave "Enable Auto-Cut"
+      on to apply automatically. SponsorBlock sends only a privacy-preserving
+      hash of the video ID. AI highlights use your own Anthropic key and send
+      the transcript to Claude. Changes apply on the next video / reload.
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

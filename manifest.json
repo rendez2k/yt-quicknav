@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Quick Nav + Cinema",
+  "version": "1.13.0",
+  "description": "YouTube quick-access buttons, one-click Like/Watch Later, auto cinema mode, and Auto-Cut that skips sponsors/messaging and speeds through the dull parts.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://sponsor.ajay.app/*",
+    "https://api.anthropic.com/*"
+  ],
+  "action": {
+    "default_title": "YouTube Quick Nav + Cinema",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["injected.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
