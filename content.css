@@ -101,7 +101,7 @@
   position: fixed;
   z-index: 100001;
   width: 320px;
-  max-height: 60vh;
+  max-height: 60vh; /* fallback; JS caps this to the space below the button */
   overflow-y: auto;
   background: var(--yt-spec-menu-background, #fff);
   color: var(--yt-spec-text-primary, #0f0f0f);

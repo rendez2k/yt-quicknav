@@ -240,18 +240,31 @@
     panel.id = "yqn-cut-panel";
     document.body.appendChild(panel);
     renderCutPanel();
-    const btn = document.getElementById("yqn-cut-btn");
-    if (btn) {
-      const r = btn.getBoundingClientRect();
-      panel.style.top = r.bottom + 6 + "px";
-      panel.style.left = Math.max(8, r.left) + "px";
-    }
+    positionCutPanel();
+    window.addEventListener("resize", positionCutPanel);
     setTimeout(() => document.addEventListener("click", cutPanelOutside, true), 0);
+  }
+
+  // Anchor the panel under the Auto-Cut button and cap its height to the space
+  // left below it, so a long cut list scrolls inside the panel instead of
+  // running off the bottom of the viewport.
+  function positionCutPanel() {
+    const panel = document.getElementById("yqn-cut-panel");
+    if (!panel) return;
+    const btn = document.getElementById("yqn-cut-btn");
+    if (!btn) return;
+    const margin = 8;
+    const r = btn.getBoundingClientRect();
+    const top = r.bottom + 6;
+    panel.style.top = top + "px";
+    panel.style.left = Math.max(margin, r.left) + "px";
+    panel.style.maxHeight = Math.max(120, window.innerHeight - top - margin) + "px";
   }
 
   function closeCutPanel() {
     const p = document.getElementById("yqn-cut-panel");
     if (p) p.remove();
+    window.removeEventListener("resize", positionCutPanel);
     document.removeEventListener("click", cutPanelOutside, true);
   }
 
