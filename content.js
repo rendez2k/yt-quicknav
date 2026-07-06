@@ -17,6 +17,7 @@
     showLibrary: true,
     showLike: true,
     showToggle: true,
+    showCopyLink: true,
     // Auto-Cut
     showCut: true,
     autoCut: false,
@@ -142,7 +143,10 @@
     }
 
     // Separate the link section from the action toggles.
-    if (hasLinks && (settings.showLike || settings.showToggle || settings.showCut)) {
+    if (
+      hasLinks &&
+      (settings.showLike || settings.showToggle || settings.showCut || settings.showCopyLink)
+    ) {
       const sep = document.createElement("span");
       sep.className = "yqn-sep";
       bar.appendChild(sep);
@@ -188,7 +192,36 @@
       bar.appendChild(btn);
     }
 
+    if (settings.showCopyLink) {
+      const btn = document.createElement("button");
+      btn.id = "yqn-copy-btn";
+      btn.className = "yqn-pill yqn-pill-action";
+      btn.type = "button";
+      btn.title = "Copy a link to this video at the current time";
+      btn.innerHTML = `<span class="yqn-ico">🔗</span><span>Copy Link</span>`;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        copyTimestampLink();
+      });
+      bar.appendChild(btn);
+    }
+
     return bar;
+  }
+
+  // Copy a "watch at current time" URL to the clipboard.
+  async function copyTimestampLink() {
+    const vid = getVideoId();
+    if (!vid) return;
+    const v = getVideoEl();
+    const t = v ? Math.floor(v.currentTime || 0) : 0;
+    const url = `https://www.youtube.com/watch?v=${vid}` + (t > 0 ? `&t=${t}s` : "");
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(t > 0 ? `Link copied at ${fmtTime(t)}` : "Link copied");
+    } catch {
+      toast("Couldn't copy link");
+    }
   }
 
   // Paint a toggle button green (on) or red (off).
@@ -242,7 +275,16 @@
     renderCutPanel();
     positionCutPanel();
     window.addEventListener("resize", positionCutPanel);
+    document.addEventListener("keydown", cutPanelKey, true);
     setTimeout(() => document.addEventListener("click", cutPanelOutside, true), 0);
+  }
+
+  // Close the panel on Escape.
+  function cutPanelKey(e) {
+    if (e.key === "Escape" && document.getElementById("yqn-cut-panel")) {
+      e.stopPropagation();
+      closeCutPanel();
+    }
   }
 
   // Anchor the panel under the Auto-Cut button and cap its height to the space
@@ -265,6 +307,7 @@
     const p = document.getElementById("yqn-cut-panel");
     if (p) p.remove();
     window.removeEventListener("resize", positionCutPanel);
+    document.removeEventListener("keydown", cutPanelKey, true);
     document.removeEventListener("click", cutPanelOutside, true);
   }
 
@@ -274,6 +317,18 @@
     if (panel.contains(e.target)) return;
     if (e.target.closest && e.target.closest("#yqn-cut-btn")) return;
     closeCutPanel();
+  }
+
+  // Estimated wall-clock time saved by a plan: skipped segments are removed
+  // entirely; sped-up segments save the fraction (1 − 1/rate) of their length.
+  function cutTimeSaved(segments) {
+    const rate = Math.max(1.25, Math.min(4, +settings.speedRate || 3));
+    let saved = 0;
+    for (const s of segments) {
+      const dur = Math.max(0, s.end - s.start);
+      saved += s.action === "skip" ? dur : dur * (1 - 1 / rate);
+    }
+    return saved;
   }
 
   function renderCutPanel() {
@@ -308,9 +363,12 @@
     } else {
       const skips = cutPlan.segments.filter((s) => s.action === "skip").length;
       const speeds = cutPlan.segments.length - skips;
+      const saved = cutTimeSaved(cutPlan.segments);
       const sum = document.createElement("div");
       sum.className = "yqn-cp-sum";
-      sum.textContent = `${cutPlan.segments.length} cuts · ${skips} skipped · ${speeds} sped up`;
+      sum.textContent =
+        `${cutPlan.segments.length} cuts · ${skips} skipped · ${speeds} sped up` +
+        (saved >= 1 ? ` · ~${fmtTime(saved)} saved` : "");
       body.appendChild(sum);
 
       const list = document.createElement("div");
@@ -1515,6 +1573,24 @@
       location.origin
     );
   }
+
+  // Keyboard shortcut: Shift+C toggles Auto-Cut on watch pages.
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.defaultPrevented) return;
+      if (e.code !== "KeyC" || !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+      if (!isWatchPage()) return;
+      const el = document.activeElement;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleAutoCut();
+      updateCutButton();
+      renderCutPanelIfOpen();
+    },
+    true
+  );
 
   // SPA navigation hooks.
   window.addEventListener("yt-navigate-finish", run);

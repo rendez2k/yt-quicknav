@@ -7,6 +7,7 @@ const DEFAULTS = {
   showLibrary: true,
   showLike: true,
   showToggle: true,
+  showCopyLink: true,
   showCut: true,
   autoCut: false,
   cutMessaging: true,

@@ -3,8 +3,11 @@
 A Chrome (Manifest V3) extension that:
 
 - Adds a row of quick-access pill buttons under the video title on YouTube watch pages:
-  **History · Watch Later · Subscriptions · Liked · Library · Like · Watch Later: toggle**
+  **History · Watch Later · Subscriptions · Liked · Library · Like · Watch Later: toggle · Copy Link**
 - Auto-opens videos in **cinema (theater) mode**.
+
+The **Copy Link** button copies a shareable URL to the current video **at the
+current playback time** (`…/watch?v=…&t=123s`) to your clipboard in one click.
 
 The **Like** and **Watch Later: toggle** action buttons colour themselves
 **green when active** (liked / in Watch Later) and **red when not**.
@@ -32,6 +35,10 @@ at your chosen speed-through rate. Toggle per video with the ✂️ button, or l
 Cut segments are drawn on the player progress bar — **red** = skipped,
 **amber** = sped through. Plans are cached locally per video (3 days) so
 re-watching is instant and doesn't re-hit the APIs.
+
+The cut-list panel (opened with the ✂️ button) lists every cut, shows an
+estimate of the **time saved** in its summary, and closes on **Esc**. Press
+**Shift+C** on a watch page to toggle Auto-Cut without opening the panel.
 
 Coverage note: Auto-Cut can only cut what data exists. Brand-new videos have no
 SponsorBlock submissions or "most replayed" data yet, so there's nothing to cut.
