@@ -24,6 +24,7 @@
     autoCut: false,
     cutMessaging: true,
     cutBoring: true,
+    autoCutPlus: false,
     aiHighlights: false,
     anthropicKey: "",
     aiModel: "claude-haiku-4-5-20251001",
@@ -1107,7 +1108,7 @@
     const info = {
       sbEnabled: !!settings.cutMessaging,
       sbCount: 0,
-      heatmapEnabled: !!settings.cutBoring,
+      heatmapEnabled: !!(settings.cutBoring || settings.autoCutPlus),
       heatmapPoints: 0,
       aiEnabled: !!(settings.aiHighlights && settings.anthropicKey),
       aiKeyMissing: !!settings.aiHighlights && !settings.anthropicKey,
@@ -1130,7 +1131,7 @@
     dlog("[YQN] plan: SponsorBlock", info.sbCount);
 
     // 2/4) Data that needs the page context (heatmap + transcript).
-    const needHeatmap = !!settings.cutBoring;
+    const needHeatmap = !!(settings.cutBoring || settings.autoCutPlus);
     const needTranscript = info.aiEnabled;
     let pageData = null;
     if (needHeatmap || needTranscript) {
@@ -1147,7 +1148,7 @@
       return v && isFinite(v.duration) ? v.duration : 0;
     })();
 
-    if (settings.cutBoring && pageData && pageData.heatmap) {
+    if ((settings.cutBoring || settings.autoCutPlus) && pageData && pageData.heatmap) {
       info.heatmapPoints = pageData.heatmap.length;
       if (pageData.heatmap.length) segs.push(...boringFromHeatmap(pageData.heatmap));
     }
@@ -1250,9 +1251,14 @@
   // low-engagement stretches are sped through. -----
   function boringFromHeatmap(heatmap) {
     // heatmap: [{start, end, score(0..1)}]
+    // Plus mode trims far more aggressively: only the hottest stretches keep
+    // normal speed, more of the video is sped up, and shorter runs qualify.
+    const plus = !!settings.autoCutPlus;
     const max = Math.max(...heatmap.map((h) => h.score || 0), 0.0001);
-    const speedT = 0.62 * max; // below this = low engagement -> speed
-    const skipT = 0.28 * max; // below this = dead zone -> skip
+    const speedT = (plus ? 0.8 : 0.62) * max; // below this = low engagement -> speed
+    const skipT = (plus ? 0.42 : 0.28) * max; // below this = dead zone -> skip
+    const minSkip = plus ? 4 : 6;
+    const minSpeed = plus ? 3 : 5;
 
     const tier = (h) => {
       const s = h.score || 0;
@@ -1289,7 +1295,7 @@
 
     // Min lengths so we don't stutter: skips a touch longer than speed-ups.
     return out
-      .filter((s) => (s.action === "skip" ? s.end - s.start >= 6 : s.end - s.start >= 5))
+      .filter((s) => (s.action === "skip" ? s.end - s.start >= minSkip : s.end - s.start >= minSpeed))
       .map(({ _tier, ...s }) => s);
   }
 
@@ -1591,6 +1597,7 @@
         "autoCut",
         "cutMessaging",
         "cutBoring",
+        "autoCutPlus",
         "aiHighlights",
         "anthropicKey",
         "aiModel",

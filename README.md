@@ -28,6 +28,11 @@ dull parts. Sources (each toggleable in the popup):
   `sponsor.ajay.app`.
 - **Trim dull parts** — uses YouTube's own "most replayed" graph to speed
   through low-engagement stretches. No third-party service.
+- **⚡ Plus (trim aggressively)** — an intensifier for "most replayed": only the
+  hottest stretches keep normal speed, so a much larger share of the video is
+  sped through and the true dead zones are skipped (shorter runs qualify too).
+  Speeds up at your chosen speed-through rate. Works even if "Trim dull parts"
+  is off, since it drives the same heatmap.
 - **AI highlights** — optional: sends the transcript to Claude (your own
   Anthropic API key, set in the popup) to pick the interesting parts and speed
   through the rest.
