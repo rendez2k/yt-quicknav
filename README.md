@@ -3,11 +3,15 @@
 A Chrome (Manifest V3) extension that:
 
 - Adds a row of quick-access pill buttons under the video title on YouTube watch pages:
-  **History · Watch Later · Subscriptions · Liked · Library · Like · Watch Later: toggle · Copy Link**
+  **History · Watch Later · Subscriptions · Liked · Library · Like · Watch Later: toggle · Copy Link · Peak**
 - Auto-opens videos in **cinema (theater) mode**.
 
 The **Copy Link** button copies a shareable URL to the current video **at the
 current playback time** (`…/watch?v=…&t=123s`) to your clipboard in one click.
+
+The **🔥 Peak** button jumps to the **most-replayed moment** using YouTube's own
+"most replayed" graph — press it again to hop to the next hot spot (top 5).
+There's nothing to jump to on videos without "most replayed" data yet.
 
 The **Like** and **Watch Later: toggle** action buttons colour themselves
 **green when active** (liked / in Watch Later) and **red when not**.

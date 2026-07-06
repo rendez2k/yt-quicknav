@@ -18,6 +18,7 @@
     showLike: true,
     showToggle: true,
     showCopyLink: true,
+    showPeak: true,
     // Auto-Cut
     showCut: true,
     autoCut: false,
@@ -145,7 +146,11 @@
     // Separate the link section from the action toggles.
     if (
       hasLinks &&
-      (settings.showLike || settings.showToggle || settings.showCut || settings.showCopyLink)
+      (settings.showLike ||
+        settings.showToggle ||
+        settings.showCut ||
+        settings.showCopyLink ||
+        settings.showPeak)
     ) {
       const sep = document.createElement("span");
       sep.className = "yqn-sep";
@@ -206,7 +211,57 @@
       bar.appendChild(btn);
     }
 
+    if (settings.showPeak) {
+      const btn = document.createElement("button");
+      btn.id = "yqn-peak-btn";
+      btn.className = "yqn-pill yqn-pill-action";
+      btn.type = "button";
+      btn.title = "Jump to the most-replayed moment (press again for the next hot spot)";
+      btn.innerHTML = `<span class="yqn-ico">🔥</span><span>Peak</span>`;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        jumpToPeak();
+      });
+      bar.appendChild(btn);
+    }
+
     return bar;
+  }
+
+  /* ---------- Jump to peak (most-replayed) ---------- */
+  const peakCache = new Map(); // videoId -> peaks sorted by score desc
+  let peakCycle = { vid: null, idx: 0 };
+
+  // Jump to the hottest point on YouTube's "most replayed" graph. Repeated
+  // presses cycle through the top few hot spots. Reuses the same page-helper
+  // heatmap fetch Auto-Cut uses, so it works whether or not Auto-Cut is on.
+  async function jumpToPeak() {
+    const vid = getVideoId();
+    if (!vid) return;
+    let peaks = peakCache.get(vid);
+    if (!peaks) {
+      toast("Finding the peak…");
+      const data = await requestAutocutData(vid, true, false);
+      peaks = ((data && data.heatmap) || [])
+        .filter((h) => isFinite(h.start))
+        .sort((a, b) => (b.score || 0) - (a.score || 0));
+      peakCache.set(vid, peaks);
+    }
+    if (!peaks.length) {
+      toast("No 'most replayed' data for this video yet");
+      return;
+    }
+    const top = Math.min(5, peaks.length);
+    if (peakCycle.vid !== vid) peakCycle = { vid, idx: 0 };
+    const idx = peakCycle.idx % top;
+    const target = peaks[idx];
+    peakCycle.idx = (idx + 1) % top;
+    const v = getVideoEl();
+    if (v) {
+      v.currentTime = Math.max(0, target.start);
+      if (v.play) v.play().catch(() => {});
+    }
+    toast(`Jumped to peak ${idx + 1}/${top} · ${fmtTime(target.start)}`);
   }
 
   // Copy a "watch at current time" URL to the clipboard.

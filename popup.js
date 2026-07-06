@@ -8,6 +8,7 @@ const DEFAULTS = {
   showLike: true,
   showToggle: true,
   showCopyLink: true,
+  showPeak: true,
   showCut: true,
   autoCut: false,
   cutMessaging: true,
