@@ -137,6 +137,28 @@
 #yqn-cut-panel .yqn-cp-switch.on { background: #0a8f3c; }
 #yqn-cut-panel .yqn-cp-switch.off { background: #c00; }
 
+#yqn-cut-panel .yqn-cp-ctrls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#yqn-cut-panel .yqn-cp-ignore {
+  border: 1px solid var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.15));
+  border-radius: 14px;
+  padding: 3px 10px;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--yt-spec-text-secondary, #606060);
+}
+#yqn-cut-panel .yqn-cp-ignore.on {
+  background: #606060;
+  color: #fff;
+  border-color: transparent;
+}
+
 #yqn-cut-panel .yqn-cp-body { padding: 6px 0 8px; }
 
 #yqn-cut-panel .yqn-cp-msg {

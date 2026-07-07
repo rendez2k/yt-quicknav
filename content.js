@@ -301,7 +301,8 @@
 
     const label = btn.querySelectorAll("span")[1];
     if (label) {
-      if (settings.autoCut && havePlan) label.textContent = `Auto-Cut · ${n}`;
+      if (settings.autoCut && cutIgnored) label.textContent = "Auto-Cut · ignored";
+      else if (settings.autoCut && havePlan) label.textContent = `Auto-Cut · ${n}`;
       else if (settings.autoCut && cutPlanningFor === vid) label.textContent = "Auto-Cut …";
       else label.textContent = "Auto-Cut";
     }
@@ -414,13 +415,30 @@
       toggleAutoCut();
       renderCutPanel();
     });
-    head.appendChild(sw);
+    const ign = document.createElement("button");
+    ign.type = "button";
+    ign.className = "yqn-cp-ignore" + (cutIgnored ? " on" : "");
+    ign.textContent = cutIgnored ? "Ignored" : "Ignore";
+    ign.title = cutIgnored
+      ? "Auto-Cut is leaving this video alone — click to re-enable"
+      : "Never cut this video (handy for music)";
+    ign.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleIgnoreVideo();
+    });
+    const ctrls = document.createElement("span");
+    ctrls.className = "yqn-cp-ctrls";
+    ctrls.appendChild(ign);
+    ctrls.appendChild(sw);
+    head.appendChild(ctrls);
 
     const body = document.createElement("div");
     body.className = "yqn-cp-body";
 
     if (!settings.autoCut) {
       body.innerHTML = `<div class="yqn-cp-msg">Auto-Cut is off. Turn it on to trim this video.</div>`;
+    } else if (cutIgnored) {
+      body.innerHTML = `<div class="yqn-cp-msg">This video is ignored — nothing will be skipped or sped up here (handy for music). Click "Ignored" to re-enable.</div>`;
     } else if (!havePlan) {
       body.innerHTML = `<div class="yqn-cp-msg">Analysing this video…</div>`;
     } else if (!cutPlan.segments.length) {
@@ -480,6 +498,7 @@
 
   function cutStatusText() {
     if (!settings.autoCut) return "Auto-Cut is off — click to trim this video";
+    if (cutIgnored) return "Auto-Cut is ignoring this video — open the panel to re-enable";
     const vid = getVideoId();
     if (cutPlan && cutPlan.videoId === vid) {
       if (!cutPlan.segments.length) return emptyReason(false) + "\n" + diagString();
@@ -755,6 +774,65 @@
     }
   }
 
+  /* ---------- per-video ignore list ----------
+   * Some videos should never be cut — music above all, where "low engagement"
+   * stretches and lyric transcripts make every source misfire. The panel's
+   * Ignore button exempts the current video permanently (until un-ignored).
+   */
+  const CUT_IGNORE_KEY = "cutIgnoreV1";
+  const CUT_IGNORE_MAX = 500;
+  let cutIgnored = false; // for the current video; refreshed on navigation
+
+  function isVideoIgnored(videoId) {
+    return new Promise((resolve) => {
+      if (!videoId) return resolve(false);
+      localGet({ [CUT_IGNORE_KEY]: {} }, (store) => {
+        resolve(!!(store[CUT_IGNORE_KEY] || {})[videoId]);
+      });
+      // localGet no-ops on an orphaned extension context — don't hang forever.
+      setTimeout(() => resolve(false), 1000);
+    });
+  }
+
+  function setVideoIgnored(videoId, on) {
+    if (!videoId) return;
+    localGet({ [CUT_IGNORE_KEY]: {} }, (store) => {
+      const map = store[CUT_IGNORE_KEY] || {};
+      if (on) map[videoId] = Date.now();
+      else delete map[videoId];
+      const keys = Object.keys(map);
+      if (keys.length > CUT_IGNORE_MAX) {
+        keys
+          .sort((a, b) => (map[a] || 0) - (map[b] || 0))
+          .slice(0, keys.length - CUT_IGNORE_MAX)
+          .forEach((k) => delete map[k]);
+      }
+      localSet({ [CUT_IGNORE_KEY]: map });
+    });
+  }
+
+  function toggleIgnoreVideo() {
+    const vid = getVideoId();
+    if (!vid) return;
+    cutIgnored = !cutIgnored;
+    setVideoIgnored(vid, cutIgnored);
+    if (cutIgnored) {
+      cutPlan = null;
+      cutPlanningFor = null;
+      removeCutMarkers();
+      const v = getVideoEl();
+      if (v) v.playbackRate = 1;
+      toast("Auto-Cut will leave this video alone");
+    } else {
+      toast("Auto-Cut re-enabled for this video");
+      // Skip the storage re-read: the un-ignore write may not have committed
+      // yet, and re-reading could race back to the stale "ignored" state.
+      if (settings.autoCut) startAutoCut(true);
+    }
+    updateCutButton();
+    renderCutPanelIfOpen();
+  }
+
   const CUT_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
   const CUT_CACHE_MAX = 300;
 
@@ -865,10 +943,22 @@
     return "Auto-Cut: nothing to cut on this video";
   }
 
-  async function startAutoCut() {
+  async function startAutoCut(skipIgnoreCheck) {
     if (!settings.autoCut || !isWatchPage()) return;
     const videoId = getVideoId();
     if (!videoId || cutPlanningFor === videoId) return;
+    if (!skipIgnoreCheck) {
+      cutIgnored = await isVideoIgnored(videoId);
+      if (getVideoId() !== videoId) return;
+    }
+    if (cutIgnored) {
+      cutPlan = null;
+      removeCutMarkers();
+      setCutTooltip("Auto-Cut: ignoring this video");
+      updateCutButton();
+      renderCutPanelIfOpen();
+      return;
+    }
     cutPlanningFor = videoId;
     cutPlan = null;
     removeCutMarkers();
@@ -1726,6 +1816,15 @@
     }
     injectBar();
     enableCinema();
+    // Keep the per-video ignore state fresh even when Auto-Cut is off, so the
+    // panel's Ignore button always reflects the current video.
+    const vid = getVideoId();
+    isVideoIgnored(vid).then((ig) => {
+      if (getVideoId() === vid) {
+        cutIgnored = ig;
+        updateCutButton();
+      }
+    });
     if (settings.autoCut) startAutoCut();
   }
 

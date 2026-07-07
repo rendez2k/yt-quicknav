@@ -54,6 +54,11 @@ The cut-list panel (opened with the ✂️ button) lists every cut, shows an
 estimate of the **time saved** in its summary, and closes on **Esc**. Press
 **Shift+C** on a watch page to toggle Auto-Cut without opening the panel.
 
+The panel's **Ignore** button exempts the current video from Auto-Cut
+permanently (until un-ignored) — use it for music, where "low engagement"
+stretches and lyric transcripts make every cut source misfire. Ignored videos
+are never analysed or altered; the ✂️ button shows "Auto-Cut · ignored".
+
 Coverage note: Auto-Cut can only cut what data exists. Brand-new videos have no
 SponsorBlock submissions or "most replayed" data yet, so there's nothing to cut.
 The widest-coverage source is **AI highlights**, which works on any video that
