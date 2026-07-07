@@ -1313,11 +1313,17 @@
       '{"highlights":[{"start":n,"end":n}],"skip":[{"start":n,"end":n}]} ' +
       "with times in seconds. " +
       "highlights = the genuinely interesting/substantive moments worth " +
-      "watching at normal speed. " +
+      "watching at normal speed. Aim for highlights covering roughly 30-60% " +
+      "of the total runtime, as segments of about 15-90 seconds each. Cover " +
+      "the WHOLE video from 0s to the end - later parts matter as much as " +
+      "the opening. Be selective: everything you leave out of highlights " +
+      "will be fast-forwarded, and that is the point - do not mark a stretch " +
+      "as a highlight unless it truly earns normal speed. " +
       "skip = parts to cut entirely: sponsor reads, subscribe/like/bell " +
       "reminders, intros, outros, self-promo, dead air, and long off-topic " +
       "tangents or rambling. " +
-      "Anything you list in neither will be played back fast. No prose.";
+      "Segments must not overlap and must stay within the video duration. " +
+      "No prose.";
     const user =
       `Video duration: ${Math.round(duration)}s.\nTranscript:\n${lines}\n\n` +
       `Return the JSON.`;
@@ -1363,18 +1369,23 @@
     return segs;
   }
 
+  // Speed through everything outside the AI's highlights. An empty highlight
+  // list means nothing is worth normal speed, so the whole video is sped
+  // (skips still win on overlap via normalizeSegments) — previously this case
+  // sped nothing at all.
   function speedOutsideHighlights(highlights, duration) {
-    if (!duration || !highlights.length) return [];
+    if (!duration) return [];
+    const MIN_GAP = 5; // shorter dull stretches aren't worth the rate flicker
     const keep = [...highlights].sort((a, b) => a.start - b.start);
     const gaps = [];
     let cursor = 0;
     for (const h of keep) {
-      if (h.start - cursor >= 8) {
+      if (h.start - cursor >= MIN_GAP) {
         gaps.push({ start: cursor, end: h.start, action: "speed", reason: "off-highlight" });
       }
       cursor = Math.max(cursor, h.end);
     }
-    if (duration - cursor >= 8) {
+    if (duration - cursor >= MIN_GAP) {
       gaps.push({ start: cursor, end: duration, action: "speed", reason: "off-highlight" });
     }
     return gaps;
