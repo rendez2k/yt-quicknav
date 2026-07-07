@@ -39,6 +39,8 @@ dull parts. Sources (each toggleable in the popup):
   Sonnet (smarter judgment, ~3× cost). Every AI skip carries a short reason
   ("AI: sponsor read", "AI: repeats earlier point") shown in the cut list, and
   the panel names the model that made the plan — handy for comparing models.
+  Since the transcript is already being analysed, the same call also returns a
+  **2-3 sentence summary** of the video, shown at the top of the cut-list panel.
 
 Skipped junk jumps silently (with a small toast); dull/off-highlight parts play
 at your chosen speed-through rate. Toggle per video with the ✂️ button, or leave

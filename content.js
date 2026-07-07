@@ -426,6 +426,12 @@
     } else if (!cutPlan.segments.length) {
       body.innerHTML = `<div class="yqn-cp-msg">${emptyReason(false)}</div>`;
     } else {
+      if (cutPlan.summary) {
+        const summary = document.createElement("div");
+        summary.className = "yqn-cp-summary";
+        summary.textContent = cutPlan.summary;
+        body.appendChild(summary);
+      }
       const skips = cutPlan.segments.filter((s) => s.action === "skip").length;
       const speeds = cutPlan.segments.length - skips;
       const saved = cutTimeSaved(cutPlan.segments);
@@ -763,7 +769,11 @@
         const hit = cache[videoId];
         // Only serve non-empty cached plans.
         if (hit && hit.segments && hit.segments.length && Date.now() - hit.ts < CUT_CACHE_TTL) {
-          resolve({ segments: hit.segments, aiModel: hit.aiModel || null });
+          resolve({
+            segments: hit.segments,
+            aiModel: hit.aiModel || null,
+            summary: hit.summary || null,
+          });
         } else {
           resolve(null);
         }
@@ -771,12 +781,17 @@
     });
   }
 
-  function setCachedPlan(videoId, segments, aiModel) {
+  function setCachedPlan(videoId, segments, aiModel, summary) {
     // Never cache empty plans — a transient failure shouldn't stick.
     if (!segments || !segments.length) return;
     localGet({ [CUT_CACHE_KEY]: {} }, (store) => {
       const cache = store[CUT_CACHE_KEY] || {};
-      cache[videoId] = { segments, ts: Date.now(), aiModel: aiModel || null };
+      cache[videoId] = {
+        segments,
+        ts: Date.now(),
+        aiModel: aiModel || null,
+        summary: summary || null,
+      };
       const keys = Object.keys(cache);
       if (keys.length > CUT_CACHE_MAX) {
         keys
@@ -863,7 +878,12 @@
     // Serve an instant plan from cache if we've analysed this video recently.
     const cached = await getCachedPlan(videoId);
     if (cached && getVideoId() === videoId && settings.autoCut) {
-      cutPlan = { videoId, segments: cached.segments, aiModel: cached.aiModel };
+      cutPlan = {
+        videoId,
+        segments: cached.segments,
+        aiModel: cached.aiModel,
+        summary: cached.summary,
+      };
       dlog("[YQN] cut plan (cached)", { videoId, segments: cached.segments });
       announcePlan(cached.segments, true);
       scheduleMarkerRender();
@@ -875,14 +895,15 @@
       // Ignore if the user navigated away meanwhile.
       if (getVideoId() !== videoId || !settings.autoCut) return;
       const aiModel = (lastPlanInfo && lastPlanInfo.aiModelUsed) || null;
-      cutPlan = { videoId, segments, aiModel };
+      const summary = (lastPlanInfo && lastPlanInfo.aiSummary) || null;
+      cutPlan = { videoId, segments, aiModel, summary };
       // Only cache a *complete* plan. If AI was enabled but the transcript
       // came back empty (a fetch failure, not genuinely no captions), don't
       // cache — otherwise a partial SponsorBlock-only plan gets stuck and AI
       // never retries on revisits.
       const aiIncomplete =
         lastPlanInfo && lastPlanInfo.aiEnabled && lastPlanInfo.transcriptLines === 0;
-      if (!aiIncomplete) setCachedPlan(videoId, segments, aiModel);
+      if (!aiIncomplete) setCachedPlan(videoId, segments, aiModel, summary);
       dlog("[YQN] cut plan", { videoId, segments, cached: !aiIncomplete });
       announcePlan(segments, false);
       scheduleMarkerRender();
@@ -1061,6 +1082,19 @@
   }
 
   async function getTranscriptFromPanel() {
+    // Track whether we had to expand the description to reach the
+    // "Show transcript" button, so we can collapse it again afterwards
+    // instead of leaving the page shifted.
+    let weExpandedDescription = false;
+    const collapseDescription = () => {
+      if (!weExpandedDescription) return;
+      weExpandedDescription = false;
+      const collapse = document.querySelector(
+        "ytd-watch-metadata #collapse, tp-yt-paper-button#collapse, #description #collapse"
+      );
+      if (collapse && collapse.offsetParent !== null) collapse.click();
+    };
+
     try {
       window.postMessage({ source: "yqn", type: "transcript-reset" }, location.origin);
 
@@ -1070,8 +1104,9 @@
           const expand = document.querySelector(
             "ytd-watch-metadata #expand, tp-yt-paper-button#expand, #description #expand"
           );
-          if (expand) {
+          if (expand && expand.offsetParent !== null) {
             expand.click();
+            weExpandedDescription = true;
             await sleep(400);
             btn = findShowTranscriptButton();
           }
@@ -1134,6 +1169,7 @@
       dlog("[YQN] transcript panel error:", e && e.message);
       return [];
     } finally {
+      collapseDescription();
       setTranscriptPanelHidden(false);
     }
   }
@@ -1212,6 +1248,7 @@
           const aiSegs = segmentsFromAI(ai, duration);
           info.aiCut = aiSegs.length;
           info.aiModelUsed = settings.aiModel || "claude-haiku-4-5-20251001";
+          info.aiSummary = ai.summary || "";
           segs.push(...aiSegs);
         } else {
           dlog("[YQN] AI highlights: no result (timeout or error)");
@@ -1341,6 +1378,7 @@
   const AI_CUT_SCHEMA = {
     type: "object",
     properties: {
+      summary: { type: "string" },
       highlights: {
         type: "array",
         items: {
@@ -1364,7 +1402,7 @@
         },
       },
     },
-    required: ["highlights", "skip"],
+    required: ["summary", "highlights", "skip"],
     additionalProperties: false,
   };
 
@@ -1387,8 +1425,10 @@
     const sys =
       "You edit a YouTube video down to its worthwhile parts using its " +
       "timestamped transcript. Return ONLY JSON of the form " +
-      '{"highlights":[{"start":n,"end":n}],"skip":[{"start":n,"end":n}]} ' +
+      '{"summary":s,"highlights":[{"start":n,"end":n}],"skip":[{"start":n,"end":n,"reason":s}]} ' +
       "with times in seconds. " +
+      "summary = 2-3 plain sentences on what the video actually covers and " +
+      "its main takeaways - concrete, no fluff, no 'this video...' framing. " +
       "highlights = the genuinely interesting/substantive moments worth " +
       "watching at normal speed. Aim for highlights covering roughly 30-60% " +
       "of the total runtime, as segments of about 15-90 seconds each. Cover " +
@@ -1446,7 +1486,11 @@
           end: +r.end,
           reason: typeof r.reason === "string" ? r.reason.slice(0, 60) : undefined,
         }));
-    const out = { highlights: clean(obj.highlights), skip: clean(obj.skip) };
+    const out = {
+      highlights: clean(obj.highlights),
+      skip: clean(obj.skip),
+      summary: typeof obj.summary === "string" ? obj.summary.slice(0, 800) : "",
+    };
     // Don't fast-forward the part of the video the model never saw.
     if (truncated && duration - seenUpTo > 1) {
       out.highlights.push({ start: seenUpTo, end: duration });

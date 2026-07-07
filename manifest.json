@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Quick Nav + Cinema",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "YouTube quick-access buttons, one-click Like/Watch Later, auto cinema mode, and Auto-Cut that skips sponsors/messaging and speeds through the dull parts.",
   "permissions": ["storage"],
   "host_permissions": [

@@ -145,6 +145,13 @@
   line-height: 1.4;
 }
 
+#yqn-cut-panel .yqn-cp-summary {
+  padding: 10px 14px 2px;
+  color: var(--yt-spec-text-primary, #0f0f0f);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
 #yqn-cut-panel .yqn-cp-sum {
   padding: 8px 14px 4px;
   color: var(--yt-spec-text-secondary, #606060);
