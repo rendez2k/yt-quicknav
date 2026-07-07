@@ -35,7 +35,10 @@ dull parts. Sources (each toggleable in the popup):
   is off, since it drives the same heatmap.
 - **AI highlights** — optional: sends the transcript to Claude (your own
   Anthropic API key, set in the popup) to pick the interesting parts and speed
-  through the rest.
+  through the rest. Pick the model in the popup — Haiku (fast, cheap) or
+  Sonnet (smarter judgment, ~3× cost). Every AI skip carries a short reason
+  ("AI: sponsor read", "AI: repeats earlier point") shown in the cut list, and
+  the panel names the model that made the plan — handy for comparing models.
 
 Skipped junk jumps silently (with a small toast); dull/off-highlight parts play
 at your chosen speed-through rate. Toggle per video with the ✂️ button, or leave

@@ -36,6 +36,10 @@
         border: 1px solid #ccc; border-radius: 5px;
       }
       input[type="number"] { width: 48px; }
+      select {
+        max-width: 130px; font-size: 12px; padding: 3px 5px;
+        border: 1px solid #ccc; border-radius: 5px; background: #fff;
+      }
     </style>
   </head>
   <body>
@@ -115,6 +119,13 @@
     <div class="row sub">
       <label for="anthropicKey">Anthropic API key</label>
       <input type="password" id="anthropicKey" placeholder="sk-ant-…" />
+    </div>
+    <div class="row sub">
+      <label for="aiModel">AI model</label>
+      <select id="aiModel">
+        <option value="claude-haiku-4-5-20251001">Haiku — fast, cheap</option>
+        <option value="claude-sonnet-5">Sonnet — smarter, ~3× cost</option>
+      </select>
     </div>
     <div class="row sub">
       <label for="speedRate">Speed-through rate</label>

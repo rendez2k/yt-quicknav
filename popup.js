@@ -21,8 +21,8 @@ const DEFAULTS = {
   debug: false,
 };
 
-// Fields that are text/number inputs rather than checkboxes.
-const VALUE_FIELDS = { anthropicKey: "string", speedRate: "number" };
+// Fields that are text/number/select inputs rather than checkboxes.
+const VALUE_FIELDS = { anthropicKey: "string", speedRate: "number", aiModel: "string" };
 
 chrome.storage.sync.get(DEFAULTS, (settings) => {
   for (const key of Object.keys(DEFAULTS)) {

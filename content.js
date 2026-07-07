@@ -375,6 +375,15 @@
     closeCutPanel();
   }
 
+  // Human name for the AI model that produced a plan, shown in the panel so
+  // different models' cut quality can be compared.
+  function shortModelName(id) {
+    if (/haiku/i.test(id)) return "AI: Haiku";
+    if (/sonnet/i.test(id)) return "AI: Sonnet";
+    if (/opus/i.test(id)) return "AI: Opus";
+    return "AI: " + id;
+  }
+
   // Estimated wall-clock time saved by a plan: skipped segments are removed
   // entirely; sped-up segments save the fraction (1 − 1/rate) of their length.
   function cutTimeSaved(segments) {
@@ -424,7 +433,8 @@
       sum.className = "yqn-cp-sum";
       sum.textContent =
         `${cutPlan.segments.length} cuts · ${skips} skipped · ${speeds} sped up` +
-        (saved >= 1 ? ` · ~${fmtTime(saved)} saved` : "");
+        (saved >= 1 ? ` · ~${fmtTime(saved)} saved` : "") +
+        (cutPlan.aiModel ? ` · ${shortModelName(cutPlan.aiModel)}` : "");
       body.appendChild(sum);
 
       const list = document.createElement("div");
@@ -742,9 +752,9 @@
   const CUT_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
   const CUT_CACHE_MAX = 300;
 
-  // v3 key so previously-cached partial plans (SponsorBlock-only, before the
-  // AI transcript fix) are dropped and re-analysed.
-  const CUT_CACHE_KEY = "cutCacheV4";
+  // v5 key: plans now carry per-skip AI reasons and the model that made them,
+  // so older cached plans are dropped and re-analysed.
+  const CUT_CACHE_KEY = "cutCacheV5";
 
   function getCachedPlan(videoId) {
     return new Promise((resolve) => {
@@ -753,7 +763,7 @@
         const hit = cache[videoId];
         // Only serve non-empty cached plans.
         if (hit && hit.segments && hit.segments.length && Date.now() - hit.ts < CUT_CACHE_TTL) {
-          resolve(hit.segments);
+          resolve({ segments: hit.segments, aiModel: hit.aiModel || null });
         } else {
           resolve(null);
         }
@@ -761,12 +771,12 @@
     });
   }
 
-  function setCachedPlan(videoId, segments) {
+  function setCachedPlan(videoId, segments, aiModel) {
     // Never cache empty plans — a transient failure shouldn't stick.
     if (!segments || !segments.length) return;
     localGet({ [CUT_CACHE_KEY]: {} }, (store) => {
       const cache = store[CUT_CACHE_KEY] || {};
-      cache[videoId] = { segments, ts: Date.now() };
+      cache[videoId] = { segments, ts: Date.now(), aiModel: aiModel || null };
       const keys = Object.keys(cache);
       if (keys.length > CUT_CACHE_MAX) {
         keys
@@ -853,9 +863,9 @@
     // Serve an instant plan from cache if we've analysed this video recently.
     const cached = await getCachedPlan(videoId);
     if (cached && getVideoId() === videoId && settings.autoCut) {
-      cutPlan = { videoId, segments: cached };
-      dlog("[YQN] cut plan (cached)", { videoId, segments: cached });
-      announcePlan(cached, true);
+      cutPlan = { videoId, segments: cached.segments, aiModel: cached.aiModel };
+      dlog("[YQN] cut plan (cached)", { videoId, segments: cached.segments });
+      announcePlan(cached.segments, true);
       scheduleMarkerRender();
       return;
     }
@@ -864,14 +874,15 @@
       const segments = await buildCutPlan(videoId);
       // Ignore if the user navigated away meanwhile.
       if (getVideoId() !== videoId || !settings.autoCut) return;
-      cutPlan = { videoId, segments };
+      const aiModel = (lastPlanInfo && lastPlanInfo.aiModelUsed) || null;
+      cutPlan = { videoId, segments, aiModel };
       // Only cache a *complete* plan. If AI was enabled but the transcript
       // came back empty (a fetch failure, not genuinely no captions), don't
       // cache — otherwise a partial SponsorBlock-only plan gets stuck and AI
       // never retries on revisits.
       const aiIncomplete =
         lastPlanInfo && lastPlanInfo.aiEnabled && lastPlanInfo.transcriptLines === 0;
-      if (!aiIncomplete) setCachedPlan(videoId, segments);
+      if (!aiIncomplete) setCachedPlan(videoId, segments, aiModel);
       dlog("[YQN] cut plan", { videoId, segments, cached: !aiIncomplete });
       announcePlan(segments, false);
       scheduleMarkerRender();
@@ -1029,6 +1040,26 @@
   // Get the transcript. Primary: capture YouTube's own get_transcript network
   // response (full, no rendering needed) — we open the panel to trigger it.
   // Fallback: scrape the rendered panel rows if capture didn't happen.
+  // While scraping, park the transcript panel off-screen so opening it doesn't
+  // reflow the page and push the video up — the data still loads and is read
+  // via the network capture or the (off-screen) DOM.
+  function setTranscriptPanelHidden(hidden) {
+    const id = "yqn-hide-transcript-style";
+    const existing = document.getElementById(id);
+    if (!hidden) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) return;
+    const style = document.createElement("style");
+    style.id = id;
+    style.textContent =
+      'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]{' +
+      "position:fixed !important;left:-10000px !important;top:0 !important;" +
+      "width:400px !important;max-height:80vh !important;z-index:-1 !important;}";
+    document.documentElement.appendChild(style);
+  }
+
   async function getTranscriptFromPanel() {
     try {
       window.postMessage({ source: "yqn", type: "transcript-reset" }, location.origin);
@@ -1070,6 +1101,7 @@
       );
       let weOpened = false;
       if (!alreadyOpen) {
+        setTranscriptPanelHidden(true);
         if (!(await openPanel())) {
           dlog("[YQN] transcript: no 'Show transcript' button found");
           return [];
@@ -1081,10 +1113,11 @@
       let result = await poll(30);
 
       // Empty and it was already open (maybe hidden/stale) — force a fresh
-      // fetch by closing and reopening.
+      // fetch by closing and reopening (off-screen).
       if (!result.length && alreadyOpen) {
         for (let i = 0; i < 6 && !closeTranscriptPanel(); i++) await sleep(200);
         await sleep(400);
+        setTranscriptPanelHidden(true);
         if (await openPanel()) {
           weOpened = true;
           result = await poll(40);
@@ -1100,6 +1133,8 @@
     } catch (e) {
       dlog("[YQN] transcript panel error:", e && e.message);
       return [];
+    } finally {
+      setTranscriptPanelHidden(false);
     }
   }
 
@@ -1176,6 +1211,7 @@
         if (ai) {
           const aiSegs = segmentsFromAI(ai, duration);
           info.aiCut = aiSegs.length;
+          info.aiModelUsed = settings.aiModel || "claude-haiku-4-5-20251001";
           segs.push(...aiSegs);
         } else {
           dlog("[YQN] AI highlights: no result (timeout or error)");
@@ -1300,12 +1336,53 @@
   }
 
   // ----- AI highlights (Claude): returns { highlights, skip } -----
+
+  // JSON schema for structured outputs — guarantees the response parses.
+  const AI_CUT_SCHEMA = {
+    type: "object",
+    properties: {
+      highlights: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { start: { type: "number" }, end: { type: "number" } },
+          required: ["start", "end"],
+          additionalProperties: false,
+        },
+      },
+      skip: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            start: { type: "number" },
+            end: { type: "number" },
+            reason: { type: "string" },
+          },
+          required: ["start", "end", "reason"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["highlights", "skip"],
+    additionalProperties: false,
+  };
+
   async function aiHighlights(transcript, duration) {
-    // Compact the transcript to timestamped lines.
-    const lines = transcript
+    // Compact the transcript to timestamped lines. The cap covers hours of
+    // speech; when exceeded, the model is told where the transcript ends and
+    // the unseen tail is kept at normal speed instead of fast-forwarded.
+    const MAX_TRANSCRIPT_CHARS = 300000;
+    const full = transcript
       .map((t) => `[${Math.round(t.start)}] ${t.text}`)
-      .join("\n")
-      .slice(0, 90000);
+      .join("\n");
+    const truncated = full.length > MAX_TRANSCRIPT_CHARS;
+    const lines = truncated ? full.slice(0, MAX_TRANSCRIPT_CHARS) : full;
+    let seenUpTo = duration;
+    if (truncated) {
+      const m = lines.match(/\[(\d+)\][^[]*$/);
+      seenUpTo = m ? +m[1] : 0;
+    }
 
     const sys =
       "You edit a YouTube video down to its worthwhile parts using its " +
@@ -1321,12 +1398,16 @@
       "as a highlight unless it truly earns normal speed. " +
       "skip = parts to cut entirely: sponsor reads, subscribe/like/bell " +
       "reminders, intros, outros, self-promo, dead air, and long off-topic " +
-      "tangents or rambling. " +
+      "tangents or rambling. Give every skip a concise 2-5 word reason " +
+      'naming what it is (e.g. "sponsor read", "intro", "repeats earlier point"). ' +
       "Segments must not overlap and must stay within the video duration. " +
       "No prose.";
     const user =
-      `Video duration: ${Math.round(duration)}s.\nTranscript:\n${lines}\n\n` +
-      `Return the JSON.`;
+      `Video duration: ${Math.round(duration)}s.\n` +
+      (truncated
+        ? `The transcript below is truncated at ${Math.round(seenUpTo)}s — only judge what is shown.\n`
+        : "") +
+      `Transcript:\n${lines}\n\nReturn the JSON.`;
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -1338,22 +1419,39 @@
       },
       body: JSON.stringify({
         model: settings.aiModel || "claude-haiku-4-5-20251001",
-        max_tokens: 2000,
+        max_tokens: 8000,
         system: sys,
+        output_config: { format: { type: "json_schema", schema: AI_CUT_SCHEMA } },
         messages: [{ role: "user", content: user }],
       }),
     });
     if (!res.ok) throw new Error("Claude HTTP " + res.status);
     const data = await res.json();
+    if (data.stop_reason === "max_tokens") dlog("[YQN] AI response hit max_tokens");
     const text = (data.content || []).map((c) => c.text || "").join("");
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("no JSON in response");
-    const obj = JSON.parse(match[0]);
+    let obj;
+    try {
+      // Structured outputs guarantee the text is valid schema-shaped JSON.
+      obj = JSON.parse(text);
+    } catch {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error("no JSON in response");
+      obj = JSON.parse(match[0]);
+    }
     const clean = (arr) =>
       (Array.isArray(arr) ? arr : [])
         .filter((r) => r && isFinite(r.start) && isFinite(r.end) && r.end > r.start)
-        .map((r) => ({ start: +r.start, end: +r.end }));
-    return { highlights: clean(obj.highlights), skip: clean(obj.skip) };
+        .map((r) => ({
+          start: +r.start,
+          end: +r.end,
+          reason: typeof r.reason === "string" ? r.reason.slice(0, 60) : undefined,
+        }));
+    const out = { highlights: clean(obj.highlights), skip: clean(obj.skip) };
+    // Don't fast-forward the part of the video the model never saw.
+    if (truncated && duration - seenUpTo > 1) {
+      out.highlights.push({ start: seenUpTo, end: duration });
+    }
+    return out;
   }
 
   // Turn the AI result into cut segments: skip the junk, speed the gaps
@@ -1363,7 +1461,7 @@
       start: s.start,
       end: s.end,
       action: "skip",
-      reason: "AI cut",
+      reason: s.reason ? "AI: " + s.reason : "AI cut",
     }));
     segs.push(...speedOutsideHighlights(ai.highlights, duration));
     return segs;
