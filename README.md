@@ -28,6 +28,10 @@ dull parts. Sources (each toggleable in the popup):
   `sponsor.ajay.app`.
 - **Trim dull parts** — uses YouTube's own "most replayed" graph to speed
   through low-engagement stretches. No third-party service.
+- **🐇 Speed only (never skip)** — a mode for the cautious: nothing is ever
+  jumped over. Segments that would be skipped play at your speed-through rate
+  instead, so sponsor reads and intros flash past but you never miss a frame.
+  Toggling it re-applies the current plan instantly (no re-analysis).
 - **⚡ Plus (trim aggressively)** — an intensifier for "most replayed": only the
   hottest stretches keep normal speed, so a much larger share of the video is
   sped through and the true dead zones are skipped (shorter runs qualify too).

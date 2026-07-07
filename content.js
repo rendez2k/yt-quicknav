@@ -25,6 +25,7 @@
     cutMessaging: true,
     cutBoring: true,
     autoCutPlus: false,
+    speedOnly: false,
     aiHighlights: false,
     anthropicKey: "",
     aiModel: "claude-haiku-4-5-20251001",
@@ -943,6 +944,16 @@
     return "Auto-Cut: nothing to cut on this video";
   }
 
+  // Speed-only mode: nothing is jumped over — segments that would be skipped
+  // are played fast instead, so no content is ever missed. Applied when a
+  // plan is loaded (the cache keeps the raw plan), so toggling is instant.
+  function maybeSpeedOnly(segments) {
+    if (!settings.speedOnly) return segments;
+    return segments.map((s) =>
+      s.action === "skip" ? { ...s, action: "speed" } : s
+    );
+  }
+
   async function startAutoCut(skipIgnoreCheck) {
     if (!settings.autoCut || !isWatchPage()) return;
     const videoId = getVideoId();
@@ -970,12 +981,12 @@
     if (cached && getVideoId() === videoId && settings.autoCut) {
       cutPlan = {
         videoId,
-        segments: cached.segments,
+        segments: maybeSpeedOnly(cached.segments),
         aiModel: cached.aiModel,
         summary: cached.summary,
       };
-      dlog("[YQN] cut plan (cached)", { videoId, segments: cached.segments });
-      announcePlan(cached.segments, true);
+      dlog("[YQN] cut plan (cached)", { videoId, segments: cutPlan.segments });
+      announcePlan(cutPlan.segments, true);
       scheduleMarkerRender();
       return;
     }
@@ -986,7 +997,7 @@
       if (getVideoId() !== videoId || !settings.autoCut) return;
       const aiModel = (lastPlanInfo && lastPlanInfo.aiModelUsed) || null;
       const summary = (lastPlanInfo && lastPlanInfo.aiSummary) || null;
-      cutPlan = { videoId, segments, aiModel, summary };
+      cutPlan = { videoId, segments: maybeSpeedOnly(segments), aiModel, summary };
       // Only cache a *complete* plan. If AI was enabled but the transcript
       // came back empty (a fetch failure, not genuinely no captions), don't
       // cache — otherwise a partial SponsorBlock-only plan gets stuck and AI
@@ -995,7 +1006,7 @@
         lastPlanInfo && lastPlanInfo.aiEnabled && lastPlanInfo.transcriptLines === 0;
       if (!aiIncomplete) setCachedPlan(videoId, segments, aiModel, summary);
       dlog("[YQN] cut plan", { videoId, segments, cached: !aiIncomplete });
-      announcePlan(segments, false);
+      announcePlan(cutPlan.segments, false);
       scheduleMarkerRender();
     } catch (err) {
       dlog("[YQN] cut plan failed:", err && err.message);
@@ -1860,6 +1871,13 @@
         settings[k] = v.newValue;
         if (cutKeys.includes(k)) cutChanged = true;
         if (k === "debug") syncDebugToPage();
+      }
+      // speedOnly changes how a plan is applied, not the analysis — re-derive
+      // the current plan from cache instead of clearing it.
+      if ("speedOnly" in changes && !cutChanged) {
+        cutPlanningFor = null;
+        cutPlan = null;
+        removeCutMarkers();
       }
       if (cutChanged) {
         // Force a fresh plan with the new settings; drop cached plans since

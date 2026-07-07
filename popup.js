@@ -14,6 +14,7 @@ const DEFAULTS = {
   cutMessaging: true,
   cutBoring: true,
   autoCutPlus: false,
+  speedOnly: false,
   aiHighlights: false,
   anthropicKey: "",
   aiModel: "claude-haiku-4-5-20251001",
