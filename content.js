@@ -837,9 +837,10 @@
   const CUT_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
   const CUT_CACHE_MAX = 300;
 
-  // v5 key: plans now carry per-skip AI reasons and the model that made them,
-  // so older cached plans are dropped and re-analysed.
-  const CUT_CACHE_KEY = "cutCacheV5";
+  // v6 key: older plans were built with the segment-merge bug (speeds
+  // swallowed into skips) and spike-relative heatmap thresholds baked in —
+  // drop them so videos re-analyse with the fixed pipeline.
+  const CUT_CACHE_KEY = "cutCacheV6";
 
   function getCachedPlan(videoId) {
     return new Promise((resolve) => {
@@ -1421,30 +1422,64 @@
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 
-  // ----- Most replayed -> tiered trim. Aggressive: dead zones are skipped,
-  // low-engagement stretches are sped through. -----
+  /* ----- Most replayed -> tiered trim. -----
+   * A marker is "dull" when it dips well below its LOCAL neighbourhood, not
+   * below a fraction of the video's single hottest spike. Comparing against a
+   * rolling median makes decisions consistent across videos: one viral moment
+   * no longer drags everything else under the threshold, a flat heatmap cuts
+   * nothing, and a naturally decaying heatmap only cuts genuine local dips.
+   * Scores are smoothed first so single noisy markers can't flip a tier.
+   * Plus mode raises the bar so much more of the video qualifies.
+   */
   function boringFromHeatmap(heatmap) {
-    // heatmap: [{start, end, score(0..1)}]
-    // Plus mode trims far more aggressively: only the hottest stretches keep
-    // normal speed, more of the video is sped up, and shorter runs qualify.
+    // heatmap: [{start, end, score(0..1)}] — typically ~100 markers.
+    const n = heatmap.length;
+    if (!n) return [];
     const plus = !!settings.autoCutPlus;
-    const max = Math.max(...heatmap.map((h) => h.score || 0), 0.0001);
-    const speedT = (plus ? 0.8 : 0.62) * max; // below this = low engagement -> speed
-    const skipT = (plus ? 0.42 : 0.28) * max; // below this = dead zone -> skip
     const minSkip = plus ? 4 : 6;
     const minSpeed = plus ? 3 : 5;
+    const speedK = plus ? 1.0 : 0.8; // below this × baseline -> speed
+    const skipK = plus ? 0.5 : 0.35; // below this × baseline -> dead zone -> skip
 
-    const tier = (h) => {
-      const s = h.score || 0;
-      if (s < skipT) return 2; // skip
-      if (s < speedT) return 1; // speed
+    // 1) Smooth single-marker noise (3-wide moving average).
+    const raw = heatmap.map((h) => h.score || 0);
+    const sm = raw.map((_, i) => {
+      let sum = 0;
+      let c = 0;
+      for (let j = Math.max(0, i - 1); j <= Math.min(n - 1, i + 1); j++) {
+        sum += raw[j];
+        c++;
+      }
+      return sum / c;
+    });
+
+    // 2) Baseline per marker: rolling local median (±10% of the video),
+    //    capped at 1.5× the global median so an extremely hot neighbourhood
+    //    doesn't set an unfairly high bar for its own edges.
+    const median = (arr) => {
+      const a = [...arr].sort((x, y) => x - y);
+      const m = a.length >> 1;
+      return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+    };
+    const glob = Math.max(median(sm), 0.0001);
+    const W = Math.max(5, Math.round(n * 0.1));
+    const baseAt = (i) => {
+      const lo = Math.max(0, i - W);
+      const hi = Math.min(n - 1, i + W);
+      return Math.min(Math.max(median(sm.slice(lo, hi + 1)), 0.0001), glob * 1.5);
+    };
+
+    const tier = (i) => {
+      const b = baseAt(i);
+      if (sm[i] < skipK * b) return 2; // skip
+      if (sm[i] < speedK * b) return 1; // speed
       return 0; // keep
     };
 
     const out = [];
     let cur = null;
-    for (const h of heatmap) {
-      const t = tier(h);
+    for (let i = 0; i < n; i++) {
+      const t = tier(i);
       if (t === 0) {
         if (cur) {
           out.push(cur);
@@ -1453,12 +1488,12 @@
         continue;
       }
       if (cur && cur._tier === t) {
-        cur.end = h.end;
+        cur.end = heatmap[i].end;
       } else {
         if (cur) out.push(cur);
         cur = {
-          start: h.start,
-          end: h.end,
+          start: heatmap[i].start,
+          end: heatmap[i].end,
           action: t === 2 ? "skip" : "speed",
           reason: t === 2 ? "dead zone" : "low replays",
           _tier: t,
@@ -1634,7 +1669,13 @@
     return gaps;
   }
 
-  // ----- merge/normalise; skip beats speed on overlap -----
+  /* ----- merge/normalise -----
+   * Skips win over speeds only where they actually overlap: speed stretches
+   * are clipped around skips, not swallowed by them. (The old version merged
+   * any touching segments into one and turned the whole thing into a skip if
+   * either half was one — a 10s sponsor skip touching a 3-minute speed
+   * stretch skipped all three minutes.)
+   */
   function normalizeSegments(segs, duration) {
     const clean = segs
       .map((s) => ({
@@ -1643,23 +1684,50 @@
         action: s.action,
         reason: s.reason,
       }))
-      .filter((s) => isFinite(s.start) && isFinite(s.end) && s.end - s.start > 0.5)
-      .sort((a, b) => a.start - b.start);
+      .filter((s) => isFinite(s.start) && isFinite(s.end) && s.end - s.start > 0.5);
 
-    const merged = [];
-    for (const s of clean) {
-      const last = merged[merged.length - 1];
-      if (last && s.start <= last.end + 0.3) {
-        last.end = Math.max(last.end, s.end);
-        if (s.action === "skip") {
-          last.action = "skip";
-          last.reason = s.reason;
+    // Union same-action segments, bridging small gaps so the playback rate
+    // doesn't flicker across slivers.
+    const mergeClass = (list, gap) => {
+      const sorted = [...list].sort((a, b) => a.start - b.start);
+      const out = [];
+      for (const s of sorted) {
+        const last = out[out.length - 1];
+        if (last && s.start <= last.end + gap) {
+          if (s.end > last.end) last.end = s.end;
+        } else {
+          out.push({ ...s });
         }
-      } else {
-        merged.push({ ...s });
       }
+      return out;
+    };
+
+    const skips = mergeClass(clean.filter((s) => s.action === "skip"), 1);
+    const speeds = mergeClass(clean.filter((s) => s.action === "speed"), 3);
+
+    // Clip each speed stretch against the skip set, splitting around skips.
+    const clipped = [];
+    for (const sp of speeds) {
+      let pieces = [{ ...sp }];
+      for (const sk of skips) {
+        const next = [];
+        for (const p of pieces) {
+          if (sk.end <= p.start || sk.start >= p.end) {
+            next.push(p);
+            continue;
+          }
+          if (sk.start > p.start) next.push({ ...p, end: sk.start });
+          if (sk.end < p.end) next.push({ ...p, start: sk.end });
+        }
+        pieces = next;
+      }
+      clipped.push(...pieces);
     }
-    return merged;
+
+    // Drop speed slivers left by clipping — not worth a rate change.
+    return [...skips, ...clipped.filter((s) => s.end - s.start >= 4)].sort(
+      (a, b) => a.start - b.start
+    );
   }
 
   // ----- request page-context data (heatmap + transcript) -----
