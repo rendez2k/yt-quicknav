@@ -66,6 +66,11 @@ permanently (until un-ignored) — use it for music, where "low engagement"
 stretches and lyric transcripts make every cut source misfire. Ignored videos
 are never analysed or altered; the ✂️ button shows "Auto-Cut · ignored".
 
+Videos YouTube categorises as **Music** are auto-ignored (toggleable in the
+popup) — the ✂️ button shows "Auto-Cut · music" and the panel explains why.
+Un-ignoring a music video from the panel is remembered for that video, so it
+gets cut on future visits too.
+
 Coverage note: Auto-Cut can only cut what data exists. Brand-new videos have no
 SponsorBlock submissions or "most replayed" data yet, so there's nothing to cut.
 The widest-coverage source is **AI highlights**, which works on any video that

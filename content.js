@@ -26,6 +26,7 @@
     cutBoring: true,
     autoCutPlus: false,
     speedOnly: false,
+    autoIgnoreMusic: true,
     aiHighlights: false,
     anthropicKey: "",
     aiModel: "claude-haiku-4-5-20251001",
@@ -302,7 +303,8 @@
 
     const label = btn.querySelectorAll("span")[1];
     if (label) {
-      if (settings.autoCut && cutIgnored) label.textContent = "Auto-Cut · ignored";
+      if (settings.autoCut && cutIgnored)
+        label.textContent = cutIgnoredAuto ? "Auto-Cut · music" : "Auto-Cut · ignored";
       else if (settings.autoCut && havePlan) label.textContent = `Auto-Cut · ${n}`;
       else if (settings.autoCut && cutPlanningFor === vid) label.textContent = "Auto-Cut …";
       else label.textContent = "Auto-Cut";
@@ -439,7 +441,9 @@
     if (!settings.autoCut) {
       body.innerHTML = `<div class="yqn-cp-msg">Auto-Cut is off. Turn it on to trim this video.</div>`;
     } else if (cutIgnored) {
-      body.innerHTML = `<div class="yqn-cp-msg">This video is ignored — nothing will be skipped or sped up here (handy for music). Click "Ignored" to re-enable.</div>`;
+      body.innerHTML = cutIgnoredAuto
+        ? `<div class="yqn-cp-msg">🎵 Detected as a music video — Auto-Cut is leaving it alone. Click "Ignored" if you want it cut anyway.</div>`
+        : `<div class="yqn-cp-msg">This video is ignored — nothing will be skipped or sped up here (handy for music). Click "Ignored" to re-enable.</div>`;
     } else if (!havePlan) {
       body.innerHTML = `<div class="yqn-cp-msg">Analysing this video…</div>`;
     } else if (!cutPlan.segments.length) {
@@ -661,6 +665,13 @@
     const data = event.data;
     if (!data || data.source !== "yqn-injected") return;
 
+    // Video category for music auto-ignore.
+    if (data.type === "video-category") {
+      const waiter = categoryWaiters.get(data.videoId);
+      if (waiter) waiter(data.category || null);
+      return;
+    }
+
     // Page-context data for Auto-Cut (heatmap + transcript).
     if (data.type === "autocut-data") {
       const waiter = autocutWaiters.get(data.videoId);
@@ -780,25 +791,27 @@
    * stretches and lyric transcripts make every source misfire. The panel's
    * Ignore button exempts the current video permanently (until un-ignored).
    */
-  const CUT_IGNORE_KEY = "cutIgnoreV1";
+  const CUT_IGNORE_KEY = "cutIgnoreV1"; // user said: never cut this video
+  const CUT_ALLOW_KEY = "cutAllowV1"; // user overrode music auto-ignore
   const CUT_IGNORE_MAX = 500;
   let cutIgnored = false; // for the current video; refreshed on navigation
+  let cutIgnoredAuto = false; // ignored because it was detected as music
 
-  function isVideoIgnored(videoId) {
+  function videoFlagGet(key, videoId) {
     return new Promise((resolve) => {
       if (!videoId) return resolve(false);
-      localGet({ [CUT_IGNORE_KEY]: {} }, (store) => {
-        resolve(!!(store[CUT_IGNORE_KEY] || {})[videoId]);
+      localGet({ [key]: {} }, (store) => {
+        resolve(!!(store[key] || {})[videoId]);
       });
       // localGet no-ops on an orphaned extension context — don't hang forever.
       setTimeout(() => resolve(false), 1000);
     });
   }
 
-  function setVideoIgnored(videoId, on) {
+  function videoFlagSet(key, videoId, on) {
     if (!videoId) return;
-    localGet({ [CUT_IGNORE_KEY]: {} }, (store) => {
-      const map = store[CUT_IGNORE_KEY] || {};
+    localGet({ [key]: {} }, (store) => {
+      const map = store[key] || {};
       if (on) map[videoId] = Date.now();
       else delete map[videoId];
       const keys = Object.keys(map);
@@ -808,27 +821,40 @@
           .slice(0, keys.length - CUT_IGNORE_MAX)
           .forEach((k) => delete map[k]);
       }
-      localSet({ [CUT_IGNORE_KEY]: map });
+      localSet({ [key]: map });
     });
   }
+
+  const isVideoIgnored = (v) => videoFlagGet(CUT_IGNORE_KEY, v);
+  const setVideoIgnored = (v, on) => videoFlagSet(CUT_IGNORE_KEY, v, on);
+  const isVideoAllowed = (v) => videoFlagGet(CUT_ALLOW_KEY, v);
+  const setVideoAllowed = (v, on) => videoFlagSet(CUT_ALLOW_KEY, v, on);
 
   function toggleIgnoreVideo() {
     const vid = getVideoId();
     if (!vid) return;
-    cutIgnored = !cutIgnored;
-    setVideoIgnored(vid, cutIgnored);
     if (cutIgnored) {
+      // Un-ignore. If this was a music auto-ignore, record the override so
+      // the video isn't re-ignored on the next visit.
+      cutIgnored = false;
+      setVideoIgnored(vid, false);
+      if (cutIgnoredAuto) setVideoAllowed(vid, true);
+      cutIgnoredAuto = false;
+      toast("Auto-Cut re-enabled for this video");
+      // Skip the storage re-read: the un-ignore write may not have committed
+      // yet, and re-reading could race back to the stale "ignored" state.
+      if (settings.autoCut) startAutoCut(true);
+    } else {
+      cutIgnored = true;
+      cutIgnoredAuto = false;
+      setVideoIgnored(vid, true);
+      setVideoAllowed(vid, false);
       cutPlan = null;
       cutPlanningFor = null;
       removeCutMarkers();
       const v = getVideoEl();
       if (v) v.playbackRate = 1;
       toast("Auto-Cut will leave this video alone");
-    } else {
-      toast("Auto-Cut re-enabled for this video");
-      // Skip the storage re-read: the un-ignore write may not have committed
-      // yet, and re-reading could race back to the stale "ignored" state.
-      if (settings.autoCut) startAutoCut(true);
     }
     updateCutButton();
     renderCutPanelIfOpen();
@@ -961,12 +987,29 @@
     if (!videoId || cutPlanningFor === videoId) return;
     if (!skipIgnoreCheck) {
       cutIgnored = await isVideoIgnored(videoId);
+      cutIgnoredAuto = false;
+      if (!cutIgnored && settings.autoIgnoreMusic) {
+        // Auto-ignore videos YouTube categorises as Music, unless the user
+        // explicitly un-ignored this one before.
+        const allowed = await isVideoAllowed(videoId);
+        if (!allowed && getVideoId() === videoId) {
+          const cat = await getVideoCategory(videoId);
+          if (cat === "Music") {
+            cutIgnored = true;
+            cutIgnoredAuto = true;
+          }
+        }
+      }
       if (getVideoId() !== videoId) return;
     }
     if (cutIgnored) {
       cutPlan = null;
       removeCutMarkers();
-      setCutTooltip("Auto-Cut: ignoring this video");
+      setCutTooltip(
+        cutIgnoredAuto
+          ? "Auto-Cut: music video — leaving it alone"
+          : "Auto-Cut: ignoring this video"
+      );
       updateCutButton();
       renderCutPanelIfOpen();
       return;
@@ -1730,6 +1773,38 @@
     );
   }
 
+  // ----- video category (for auto-ignoring music) -----
+  const categoryWaiters = new Map(); // videoId -> fn(category)
+
+  function getVideoCategory(videoId) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (cat) => {
+        if (settled) return;
+        settled = true;
+        categoryWaiters.delete(videoId);
+        resolve(cat);
+      };
+      // Early pokes can beat the player's data — only settle on a real
+      // category; the timeout resolves null for uncategorised videos.
+      categoryWaiters.set(videoId, (cat) => {
+        if (cat) finish(cat);
+      });
+      const poke = () => {
+        if (!settled) {
+          window.postMessage(
+            { source: "yqn", type: "video-category", videoId },
+            location.origin
+          );
+        }
+      };
+      poke();
+      setTimeout(poke, 600);
+      setTimeout(poke, 1400);
+      setTimeout(() => finish(null), 2400);
+    });
+  }
+
   // ----- request page-context data (heatmap + transcript) -----
   function requestAutocutData(videoId, needHeatmap, needTranscript) {
     return new Promise((resolve) => {
@@ -1901,6 +1976,7 @@
     isVideoIgnored(vid).then((ig) => {
       if (getVideoId() === vid) {
         cutIgnored = ig;
+        cutIgnoredAuto = false; // auto state is re-derived by startAutoCut
         updateCutButton();
       }
     });
@@ -1940,12 +2016,14 @@
         if (cutKeys.includes(k)) cutChanged = true;
         if (k === "debug") syncDebugToPage();
       }
-      // speedOnly changes how a plan is applied, not the analysis — re-derive
-      // the current plan from cache instead of clearing it.
-      if ("speedOnly" in changes && !cutChanged) {
+      // speedOnly / autoIgnoreMusic change how a plan is applied, not the
+      // analysis — re-derive from cache instead of clearing it.
+      if (("speedOnly" in changes || "autoIgnoreMusic" in changes) && !cutChanged) {
         cutPlanningFor = null;
         cutPlan = null;
         removeCutMarkers();
+        const v = getVideoEl();
+        if (v && v.playbackRate !== 1) v.playbackRate = 1;
       }
       if (cutChanged) {
         // Force a fresh plan with the new settings; drop cached plans since

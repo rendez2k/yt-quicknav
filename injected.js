@@ -516,6 +516,38 @@
       return;
     }
 
+    // Video category (e.g. "Music") from the player response, used by the
+    // content script to auto-ignore music videos.
+    if (data.type === "video-category") {
+      let category = null;
+      try {
+        const initial = window.ytInitialPlayerResponse;
+        const pr =
+          getLivePlayerResponse(data.videoId) ||
+          (initial &&
+          initial.videoDetails &&
+          initial.videoDetails.videoId === data.videoId
+            ? initial
+            : null);
+        category =
+          (pr &&
+            pr.microformat &&
+            pr.microformat.playerMicroformatRenderer &&
+            pr.microformat.playerMicroformatRenderer.category) ||
+          null;
+      } catch {}
+      window.postMessage(
+        {
+          source: "yqn-injected",
+          type: "video-category",
+          videoId: data.videoId,
+          category,
+        },
+        window.location.origin
+      );
+      return;
+    }
+
     if (data.type === "autocut-data") {
       const payload = await gatherAutocut(
         data.videoId,
