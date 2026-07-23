@@ -68,6 +68,8 @@ are never analysed or altered; the ✂️ button shows "Auto-Cut · ignored".
 
 Videos YouTube categorises as **Music** are auto-ignored (toggleable in the
 popup) — the ✂️ button shows "Auto-Cut · music" and the panel explains why.
+Trailers and teasers are exempt from the auto-ignore even when categorised as
+Music (matched by title), since they're regular videos worth cutting.
 Un-ignoring a music video from the panel is remembered for that video, so it
 gets cut on future visits too.
 

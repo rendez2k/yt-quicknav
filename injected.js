@@ -516,10 +516,11 @@
       return;
     }
 
-    // Video category (e.g. "Music") from the player response, used by the
-    // content script to auto-ignore music videos.
+    // Video category (e.g. "Music") + title from the player response, used by
+    // the content script to auto-ignore music videos (but not trailers).
     if (data.type === "video-category") {
       let category = null;
+      let title = null;
       try {
         const initial = window.ytInitialPlayerResponse;
         const pr =
@@ -535,6 +536,7 @@
             pr.microformat.playerMicroformatRenderer &&
             pr.microformat.playerMicroformatRenderer.category) ||
           null;
+        title = (pr && pr.videoDetails && pr.videoDetails.title) || null;
       } catch {}
       window.postMessage(
         {
@@ -542,6 +544,7 @@
           type: "video-category",
           videoId: data.videoId,
           category,
+          title,
         },
         window.location.origin
       );

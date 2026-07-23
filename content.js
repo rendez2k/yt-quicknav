@@ -665,10 +665,10 @@
     const data = event.data;
     if (!data || data.source !== "yqn-injected") return;
 
-    // Video category for music auto-ignore.
+    // Video category + title for music auto-ignore.
     if (data.type === "video-category") {
       const waiter = categoryWaiters.get(data.videoId);
-      if (waiter) waiter(data.category || null);
+      if (waiter) waiter({ category: data.category || null, title: data.title || "" });
       return;
     }
 
@@ -990,11 +990,15 @@
       cutIgnoredAuto = false;
       if (!cutIgnored && settings.autoIgnoreMusic) {
         // Auto-ignore videos YouTube categorises as Music, unless the user
-        // explicitly un-ignored this one before.
+        // explicitly un-ignored this one before. Trailers/teasers are exempt:
+        // labels often categorise them as Music, but they're regular videos
+        // with sponsor reads and filler worth cutting.
         const allowed = await isVideoAllowed(videoId);
         if (!allowed && getVideoId() === videoId) {
-          const cat = await getVideoCategory(videoId);
-          if (cat === "Music") {
+          const info = await getVideoCategory(videoId);
+          const isTrailer =
+            info && /\b(trailer|teaser)\b/i.test(info.title || "");
+          if (info && info.category === "Music" && !isTrailer) {
             cutIgnored = true;
             cutIgnoredAuto = true;
           }
@@ -1240,6 +1244,20 @@
       if (collapse && collapse.offsetParent !== null) collapse.click();
     };
 
+    // YouTube's own handlers scroll the page towards the description /
+    // transcript when those buttons are clicked. Pin the scroll position for
+    // a short window after each synthetic click — long enough to undo YT's
+    // async scrolls, short enough not to fight a user who scrolls later.
+    const scrollTimers = [];
+    const pinScroll = () => {
+      const el = document.scrollingElement || document.documentElement;
+      const y = el.scrollTop;
+      const restore = () => {
+        if (Math.abs(el.scrollTop - y) > 2) el.scrollTop = y;
+      };
+      [0, 150, 400, 800].forEach((ms) => scrollTimers.push(setTimeout(restore, ms)));
+    };
+
     try {
       window.postMessage({ source: "yqn", type: "transcript-reset" }, location.origin);
 
@@ -1250,6 +1268,7 @@
             "ytd-watch-metadata #expand, tp-yt-paper-button#expand, #description #expand"
           );
           if (expand && expand.offsetParent !== null) {
+            pinScroll();
             expand.click();
             weExpandedDescription = true;
             await sleep(400);
@@ -1257,6 +1276,7 @@
           }
         }
         if (btn) {
+          pinScroll();
           btn.click();
           return true;
         }
@@ -1267,7 +1287,10 @@
         let out = [];
         for (let i = 0; i < n && !out.length; i++) {
           await sleep(200);
-          if (i === 2) clickTranscriptTab(); // in case it opened on Chapters
+          if (i === 2) {
+            pinScroll();
+            clickTranscriptTab(); // in case it opened on Chapters
+          }
           const cap = await getCapturedTranscript();
           if (cap.length) return cap;
           const dom = readTranscriptSegments();
@@ -1314,8 +1337,10 @@
       dlog("[YQN] transcript panel error:", e && e.message);
       return [];
     } finally {
+      pinScroll();
       collapseDescription();
       setTranscriptPanelHidden(false);
+      setTimeout(() => scrollTimers.forEach(clearTimeout), 1000);
     }
   }
 
@@ -1773,22 +1798,22 @@
     );
   }
 
-  // ----- video category (for auto-ignoring music) -----
-  const categoryWaiters = new Map(); // videoId -> fn(category)
+  // ----- video category + title (for auto-ignoring music) -----
+  const categoryWaiters = new Map(); // videoId -> fn({category, title})
 
   function getVideoCategory(videoId) {
     return new Promise((resolve) => {
       let settled = false;
-      const finish = (cat) => {
+      const finish = (info) => {
         if (settled) return;
         settled = true;
         categoryWaiters.delete(videoId);
-        resolve(cat);
+        resolve(info);
       };
       // Early pokes can beat the player's data — only settle on a real
       // category; the timeout resolves null for uncategorised videos.
-      categoryWaiters.set(videoId, (cat) => {
-        if (cat) finish(cat);
+      categoryWaiters.set(videoId, (info) => {
+        if (info && info.category) finish(info);
       });
       const poke = () => {
         if (!settled) {
