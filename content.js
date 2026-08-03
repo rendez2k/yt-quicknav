@@ -27,6 +27,7 @@
     autoCutPlus: false,
     speedOnly: false,
     autoIgnoreMusic: true,
+    minCutMinutes: 2, // ignore videos shorter than this; 0 disables
     aiHighlights: false,
     anthropicKey: "",
     aiModel: "claude-haiku-4-5-20251001",
@@ -304,7 +305,12 @@
     const label = btn.querySelectorAll("span")[1];
     if (label) {
       if (settings.autoCut && cutIgnored)
-        label.textContent = cutIgnoredAuto ? "Auto-Cut · music" : "Auto-Cut · ignored";
+        label.textContent =
+          cutIgnoredWhy === "short"
+            ? "Auto-Cut · short"
+            : cutIgnoredWhy === "music"
+              ? "Auto-Cut · music"
+              : "Auto-Cut · ignored";
       else if (settings.autoCut && havePlan) label.textContent = `Auto-Cut · ${n}`;
       else if (settings.autoCut && cutPlanningFor === vid) label.textContent = "Auto-Cut …";
       else label.textContent = "Auto-Cut";
@@ -441,9 +447,12 @@
     if (!settings.autoCut) {
       body.innerHTML = `<div class="yqn-cp-msg">Auto-Cut is off. Turn it on to trim this video.</div>`;
     } else if (cutIgnored) {
-      body.innerHTML = cutIgnoredAuto
-        ? `<div class="yqn-cp-msg">🎵 Detected as a music video — Auto-Cut is leaving it alone. Click "Ignored" if you want it cut anyway.</div>`
-        : `<div class="yqn-cp-msg">This video is ignored — nothing will be skipped or sped up here (handy for music). Click "Ignored" to re-enable.</div>`;
+      body.innerHTML =
+        cutIgnoredWhy === "short"
+          ? `<div class="yqn-cp-msg">Shorter than ${settings.minCutMinutes} min — Auto-Cut leaves short videos alone (threshold in the popup). Click "Ignored" to cut it anyway.</div>`
+          : cutIgnoredWhy === "music"
+            ? `<div class="yqn-cp-msg">🎵 Detected as a music video — Auto-Cut is leaving it alone. Click "Ignored" if you want it cut anyway.</div>`
+            : `<div class="yqn-cp-msg">This video is ignored — nothing will be skipped or sped up here (handy for music). Click "Ignored" to re-enable.</div>`;
     } else if (!havePlan) {
       body.innerHTML = `<div class="yqn-cp-msg">Analysing this video…</div>`;
     } else if (!cutPlan.segments.length) {
@@ -795,7 +804,8 @@
   const CUT_ALLOW_KEY = "cutAllowV1"; // user overrode music auto-ignore
   const CUT_IGNORE_MAX = 500;
   let cutIgnored = false; // for the current video; refreshed on navigation
-  let cutIgnoredAuto = false; // ignored because it was detected as music
+  let cutIgnoredAuto = false; // auto-ignored (music / short), not by the user
+  let cutIgnoredWhy = null; // "music" | "short" | null
 
   function videoFlagGet(key, videoId) {
     return new Promise((resolve) => {
@@ -840,6 +850,7 @@
       setVideoIgnored(vid, false);
       if (cutIgnoredAuto) setVideoAllowed(vid, true);
       cutIgnoredAuto = false;
+      cutIgnoredWhy = null;
       toast("Auto-Cut re-enabled for this video");
       // Skip the storage re-read: the un-ignore write may not have committed
       // yet, and re-reading could race back to the stale "ignored" state.
@@ -847,6 +858,7 @@
     } else {
       cutIgnored = true;
       cutIgnoredAuto = false;
+      cutIgnoredWhy = null;
       setVideoIgnored(vid, true);
       setVideoAllowed(vid, false);
       cutPlan = null;
@@ -971,6 +983,22 @@
     return "Auto-Cut: nothing to cut on this video";
   }
 
+  // Wait for the player to know the video's duration (metadata can lag a
+  // moment behind navigation). Resolves 0 if it never arrives.
+  function getVideoDuration(timeoutMs) {
+    return new Promise((resolve) => {
+      const t0 = Date.now();
+      const check = () => {
+        const v = getVideoEl();
+        const d = v && isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+        if (d) return resolve(d);
+        if (Date.now() - t0 >= timeoutMs) return resolve(0);
+        setTimeout(check, 200);
+      };
+      check();
+    });
+  }
+
   // Speed-only mode: nothing is jumped over — segments that would be skipped
   // are played fast instead, so no content is ever missed. Applied when a
   // plan is loaded (the cache keeps the raw plan), so toggling is instant.
@@ -988,19 +1016,31 @@
     if (!skipIgnoreCheck) {
       cutIgnored = await isVideoIgnored(videoId);
       cutIgnoredAuto = false;
-      if (!cutIgnored && settings.autoIgnoreMusic) {
-        // Auto-ignore videos YouTube categorises as Music, unless the user
-        // explicitly un-ignored this one before. Trailers/teasers are exempt:
-        // labels often categorise them as Music, but they're regular videos
-        // with sponsor reads and filler worth cutting.
+      cutIgnoredWhy = null;
+      const minSecs = Math.max(0, +settings.minCutMinutes || 0) * 60;
+      if (!cutIgnored && (settings.autoIgnoreMusic || minSecs > 0)) {
         const allowed = await isVideoAllowed(videoId);
         if (!allowed && getVideoId() === videoId) {
-          const info = await getVideoCategory(videoId);
-          const isTrailer =
-            info && /\b(trailer|teaser)\b/i.test(info.title || "");
-          if (info && info.category === "Music" && !isTrailer) {
+          // Short videos first: nothing worth cutting, and skipping the
+          // analysis entirely also means no transcript scraping.
+          const dur = minSecs > 0 ? await getVideoDuration(3000) : 0;
+          if (minSecs > 0 && dur > 0 && dur < minSecs) {
             cutIgnored = true;
             cutIgnoredAuto = true;
+            cutIgnoredWhy = "short";
+          } else if (settings.autoIgnoreMusic && getVideoId() === videoId) {
+            // Auto-ignore videos YouTube categorises as Music, unless the
+            // user explicitly un-ignored this one before. Trailers/teasers
+            // are exempt: labels often categorise them as Music, but they're
+            // regular videos with sponsor reads and filler worth cutting.
+            const info = await getVideoCategory(videoId);
+            const isTrailer =
+              info && /\b(trailer|teaser)\b/i.test(info.title || "");
+            if (info && info.category === "Music" && !isTrailer) {
+              cutIgnored = true;
+              cutIgnoredAuto = true;
+              cutIgnoredWhy = "music";
+            }
           }
         }
       }
@@ -1010,9 +1050,11 @@
       cutPlan = null;
       removeCutMarkers();
       setCutTooltip(
-        cutIgnoredAuto
-          ? "Auto-Cut: music video — leaving it alone"
-          : "Auto-Cut: ignoring this video"
+        cutIgnoredWhy === "short"
+          ? "Auto-Cut: short video — leaving it alone"
+          : cutIgnoredWhy === "music"
+            ? "Auto-Cut: music video — leaving it alone"
+            : "Auto-Cut: ignoring this video"
       );
       updateCutButton();
       renderCutPanelIfOpen();
@@ -2002,6 +2044,7 @@
       if (getVideoId() === vid) {
         cutIgnored = ig;
         cutIgnoredAuto = false; // auto state is re-derived by startAutoCut
+        cutIgnoredWhy = null;
         updateCutButton();
       }
     });
@@ -2041,9 +2084,14 @@
         if (cutKeys.includes(k)) cutChanged = true;
         if (k === "debug") syncDebugToPage();
       }
-      // speedOnly / autoIgnoreMusic change how a plan is applied, not the
-      // analysis — re-derive from cache instead of clearing it.
-      if (("speedOnly" in changes || "autoIgnoreMusic" in changes) && !cutChanged) {
+      // speedOnly / autoIgnoreMusic / minCutMinutes change how a plan is
+      // applied, not the analysis — re-derive from cache instead of clearing.
+      if (
+        ("speedOnly" in changes ||
+          "autoIgnoreMusic" in changes ||
+          "minCutMinutes" in changes) &&
+        !cutChanged
+      ) {
         cutPlanningFor = null;
         cutPlan = null;
         removeCutMarkers();

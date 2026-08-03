@@ -66,6 +66,10 @@ permanently (until un-ignored) — use it for music, where "low engagement"
 stretches and lyric transcripts make every cut source misfire. Ignored videos
 are never analysed or altered; the ✂️ button shows "Auto-Cut · ignored".
 
+Videos **shorter than 2 minutes** (threshold configurable in the popup; 0
+disables) are auto-ignored — nothing worth cutting, and skipping the analysis
+also means no transcript scraping on quick clips.
+
 Videos YouTube categorises as **Music** are auto-ignored (toggleable in the
 popup) — the ✂️ button shows "Auto-Cut · music" and the panel explains why.
 Trailers and teasers are exempt from the auto-ignore even when categorised as
