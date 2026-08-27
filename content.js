@@ -1668,6 +1668,8 @@
       seenUpTo = m ? +m[1] : 0;
     }
 
+    // Plus mode makes the AI markedly more aggressive, matching the heatmap.
+    const plusAI = !!settings.autoCutPlus;
     const sys =
       "You edit a YouTube video down to its worthwhile parts using its " +
       "timestamped transcript. Return ONLY JSON of the form " +
@@ -1676,12 +1678,17 @@
       "summary = 2-3 plain sentences on what the video actually covers and " +
       "its main takeaways - concrete, no fluff, no 'this video...' framing. " +
       "highlights = the genuinely interesting/substantive moments worth " +
-      "watching at normal speed. Aim for highlights covering roughly 30-60% " +
-      "of the total runtime, as segments of about 15-90 seconds each. Cover " +
+      "watching at normal speed. Aim for highlights covering roughly " +
+      (plusAI ? "15-35%" : "30-60%") +
+      " of the total runtime, as segments of about 15-90 seconds each. Cover " +
       "the WHOLE video from 0s to the end - later parts matter as much as " +
       "the opening. Be selective: everything you leave out of highlights " +
       "will be fast-forwarded, and that is the point - do not mark a stretch " +
       "as a highlight unless it truly earns normal speed. " +
+      (plusAI
+        ? "Be ruthless: keep only the clearly best moments, and when a " +
+          "stretch is borderline junk, skip it rather than keep it. "
+        : "") +
       "skip = parts to cut entirely: sponsor reads, subscribe/like/bell " +
       "reminders, intros, outros, self-promo, dead air, and long off-topic " +
       "tangents or rambling. Give every skip a concise 2-5 word reason " +
@@ -1890,13 +1897,17 @@
       poke();
       setTimeout(poke, 500);
       setTimeout(poke, 1500);
+      setTimeout(poke, 3500);
+      // Generous timeout: the API chain (next + get_transcript + captions)
+      // can be slow, and giving up early forces the janky panel-scrape
+      // fallback that touches the page.
       setTimeout(() => {
         if (!settled) {
           settled = true;
           autocutWaiters.delete(videoId);
           resolve({});
         }
-      }, 6000);
+      }, 12000);
     });
   }
 

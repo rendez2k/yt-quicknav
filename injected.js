@@ -328,33 +328,19 @@
     if (needTranscript) {
       let tsrc = "none";
 
-      // 1) caption track download (fast when it works, often token-gated now)
-      let tracks =
-        (livePr && deepFindArray(livePr, "captionTracks")) ||
-        (freshGlobals && deepFindArray(pr, "captionTracks"));
-      if (!tracks && apiKey && context) {
-        try {
-          const res = await innertubeFetch("player", apiKey, auth, { context, videoId });
-          const json = await res.json().catch(() => ({}));
-          if (json && json.playabilityStatus) diag.playability = json.playabilityStatus.status;
-          tracks = deepFindArray(json, "captionTracks");
-        } catch (e) {
-          diag.playerErr = e && e.message;
+      // 1) get_transcript endpoint — the same API the transcript panel uses,
+      //    so it works where the timedtext download is token-gated. Params
+      //    come free from ytInitialData on a fresh load, else from `next`.
+      if (apiKey && context) {
+        let params =
+          freshGlobals && window.ytInitialData
+            ? findTranscriptParams(window.ytInitialData)
+            : null;
+        diag.paramsFromInitial = !!params;
+        if (!params) {
+          const nj = await getNext();
+          params = findTranscriptParams(nj);
         }
-      }
-      diag.captionTracks = tracks ? tracks.length : 0;
-      if (tracks && tracks.length) {
-        const track =
-          tracks.find((t) => (t.languageCode || "").startsWith("en")) || tracks[0];
-        payload.transcript = await fetchTranscript(track.baseUrl, diag);
-        if (payload.transcript.length) tsrc = "captions";
-      }
-
-      // 2) get_transcript endpoint — params come from the `next` response,
-      //    so no protobuf guessing. This is what the transcript panel uses.
-      if (!payload.transcript.length && apiKey && context) {
-        const nj = await getNext();
-        const params = findTranscriptParams(nj);
         diag.transcriptParams = !!params;
         if (params) {
           try {
@@ -372,6 +358,30 @@
           } catch (e) {
             diag.getTranscriptErr = e && e.message;
           }
+        }
+      }
+
+      // 2) caption track download (fallback; often token-gated now)
+      if (!payload.transcript.length) {
+        let tracks =
+          (livePr && deepFindArray(livePr, "captionTracks")) ||
+          (freshGlobals && deepFindArray(pr, "captionTracks"));
+        if (!tracks && apiKey && context) {
+          try {
+            const res = await innertubeFetch("player", apiKey, auth, { context, videoId });
+            const json = await res.json().catch(() => ({}));
+            if (json && json.playabilityStatus) diag.playability = json.playabilityStatus.status;
+            tracks = deepFindArray(json, "captionTracks");
+          } catch (e) {
+            diag.playerErr = e && e.message;
+          }
+        }
+        diag.captionTracks = tracks ? tracks.length : 0;
+        if (tracks && tracks.length) {
+          const track =
+            tracks.find((t) => (t.languageCode || "").startsWith("en")) || tracks[0];
+          payload.transcript = await fetchTranscript(track.baseUrl, diag);
+          if (payload.transcript.length) tsrc = "captions";
         }
       }
 

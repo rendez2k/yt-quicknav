@@ -35,11 +35,11 @@ dull parts. Sources (each toggleable in the popup):
   jumped over. Segments that would be skipped play at your speed-through rate
   instead, so sponsor reads and intros flash past but you never miss a frame.
   Toggling it re-applies the current plan instantly (no re-analysis).
-- **⚡ Plus (trim aggressively)** — an intensifier for "most replayed": only the
-  hottest stretches keep normal speed, so a much larger share of the video is
-  sped through and the true dead zones are skipped (shorter runs qualify too).
-  Speeds up at your chosen speed-through rate. Works even if "Trim dull parts"
-  is off, since it drives the same heatmap.
+- **⚡ Plus (trim aggressively)** — an intensifier for every source: on the
+  "most replayed" graph only the hottest stretches keep normal speed (shorter
+  runs qualify too), and the AI is told to keep just 15–35% of the runtime and
+  skip borderline junk instead of keeping it. Speeds up at your chosen
+  speed-through rate. Works even if "Trim dull parts" is off.
 - **AI highlights** — optional: sends the transcript to Claude (your own
   Anthropic API key, set in the popup) to pick the interesting parts and speed
   through the rest. Pick the model in the popup — Haiku (fast, cheap) or
@@ -76,6 +76,10 @@ Trailers and teasers are exempt from the auto-ignore even when categorised as
 Music (matched by title), since they're regular videos worth cutting.
 Un-ignoring a music video from the panel is remembered for that video, so it
 gets cut on future visits too.
+
+Transcripts are fetched through YouTube's own `get_transcript` API first (the
+same call the transcript panel makes), so the visible panel-scraping fallback —
+the thing that could nudge the page — should almost never run.
 
 Coverage note: Auto-Cut can only cut what data exists. Brand-new videos have no
 SponsorBlock submissions or "most replayed" data yet, so there's nothing to cut.
