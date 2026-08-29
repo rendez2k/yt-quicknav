@@ -31,9 +31,11 @@ dull parts. Sources (each toggleable in the popup):
   neighbourhood (a rolling median), not the video's single hottest spike — so
   one viral moment doesn't get the rest of the video cut, flat videos are left
   alone, and only genuine dips are trimmed. No third-party service.
-- **🐇 Speed only (never skip)** — a mode for the cautious: nothing is ever
-  jumped over. Segments that would be skipped play at your speed-through rate
-  instead, so sponsor reads and intros flash past but you never miss a frame.
+- **🐇 Speed only (sponsors still cut)** — a mode for the cautious: segments
+  that would be skipped play at your speed-through rate instead, so intros and
+  tangents flash past but you never miss a frame. The one exception is sponsor
+  segments (SponsorBlock's sponsor category, or an AI cut whose reason names a
+  sponsor) — those have no value at any speed and stay cut outright.
   Toggling it re-applies the current plan instantly (no re-analysis).
 - **⚡ Plus (trim aggressively)** — an intensifier for every source: on the
   "most replayed" graph only the hottest stretches keep normal speed (shorter

@@ -1000,12 +1000,18 @@
   }
 
   // Speed-only mode: nothing is jumped over — segments that would be skipped
-  // are played fast instead, so no content is ever missed. Applied when a
-  // plan is loaded (the cache keeps the raw plan), so toggling is instant.
+  // are played fast instead, so no content is ever missed. Exception: sponsor
+  // segments (SponsorBlock's category or an AI reason naming a sponsor) have
+  // no value at any speed and stay cut outright. Applied when a plan is
+  // loaded (the cache keeps the raw plan), so toggling is instant.
+  const SPONSOR_REASON_RE = /sponsor/i;
+
   function maybeSpeedOnly(segments) {
     if (!settings.speedOnly) return segments;
     return segments.map((s) =>
-      s.action === "skip" ? { ...s, action: "speed" } : s
+      s.action === "skip" && !SPONSOR_REASON_RE.test(s.reason || "")
+        ? { ...s, action: "speed" }
+        : s
     );
   }
 
