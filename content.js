@@ -457,6 +457,22 @@
       body.innerHTML = `<div class="yqn-cp-msg">Analysing this video…</div>`;
     } else if (!cutPlan.segments.length) {
       body.innerHTML = `<div class="yqn-cp-msg">${emptyReason(false)}</div>`;
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "yqn-cp-retry";
+      retry.textContent = "↻ Re-analyse";
+      retry.title = "Throw the empty result away and analyse this video again";
+      retry.addEventListener("click", (e) => {
+        e.stopPropagation();
+        cutPlan = null;
+        cutPlanningFor = null;
+        startAutoCut(true);
+        renderCutPanel();
+      });
+      const retryWrap = document.createElement("div");
+      retryWrap.className = "yqn-cp-retry-wrap";
+      retryWrap.appendChild(retry);
+      body.appendChild(retryWrap);
     } else {
       if (cutPlan.summary) {
         const summary = document.createElement("div");
@@ -1279,9 +1295,17 @@
   }
 
   async function getTranscriptFromPanel() {
-    // Track whether we had to expand the description to reach the
-    // "Show transcript" button, so we can collapse it again afterwards
-    // instead of leaving the page shifted.
+    // Rows already rendered (panel open — by the user, or left over from an
+    // earlier attempt)? Read them directly: no clicking, no closing.
+    const preRows = readTranscriptSegments();
+    if (preRows.length) {
+      dlog("[YQN] transcript: read", preRows.length, "rows from open panel");
+      return preRows.sort((a, b) => a.start - b.start);
+    }
+
+    // Track whether we opened the panel / expanded the description, so we can
+    // undo both afterwards instead of leaving the page shifted.
+    let weOpened = false;
     let weExpandedDescription = false;
     const collapseDescription = () => {
       if (!weExpandedDescription) return;
@@ -1350,7 +1374,6 @@
       const alreadyOpen = !!document.querySelector(
         "ytd-transcript-renderer, ytd-transcript-segment-renderer"
       );
-      let weOpened = false;
       if (!alreadyOpen) {
         setTranscriptPanelHidden(true);
         if (!(await openPanel())) {
@@ -1360,22 +1383,33 @@
         weOpened = true;
       }
 
-      // First pass: use the panel as-is (works when it's visible).
-      let result = await poll(30);
+      // Phase 1 (hidden): rely on the network capture — the off-screen panel
+      // still triggers YouTube's get_transcript fetch, but its virtualised
+      // rows may not render, so the DOM read can't be trusted here.
+      let result = await poll(18);
 
-      // Empty and it was already open (maybe hidden/stale) — force a fresh
-      // fetch by closing and reopening (off-screen).
+      // Phase 2 (visible): capture missed, so unhide the panel briefly — the
+      // rows only render on-screen. Scroll is pinned; the panel is closed
+      // right after. A short flash beats reporting "no captions" wrongly.
+      if (!result.length) {
+        pinScroll();
+        setTranscriptPanelHidden(false);
+        await sleep(300);
+        result = await poll(25);
+      }
+
+      // Stale already-open panel — force a fresh fetch by closing/reopening.
       if (!result.length && alreadyOpen) {
         for (let i = 0; i < 6 && !closeTranscriptPanel(); i++) await sleep(200);
         await sleep(400);
-        setTranscriptPanelHidden(true);
         if (await openPanel()) {
           weOpened = true;
-          result = await poll(40);
+          result = await poll(30);
         }
       }
 
       if (weOpened) {
+        setTranscriptPanelHidden(false);
         for (let i = 0; i < 6 && !closeTranscriptPanel(); i++) await sleep(200);
       }
 
@@ -1388,7 +1422,21 @@
       pinScroll();
       collapseDescription();
       setTranscriptPanelHidden(false);
-      setTimeout(() => scrollTimers.forEach(clearTimeout), 1000);
+      // Belt and braces: if the panel we opened somehow survived (a failed
+      // close on a hidden panel used to leave it sitting open on screen),
+      // keep trying to close it for a couple of seconds.
+      if (weOpened) {
+        let tries = 0;
+        const lateClose = () => {
+          const open = document.querySelector(
+            "ytd-transcript-renderer, ytd-transcript-segment-renderer"
+          );
+          if (!open || closeTranscriptPanel() || ++tries >= 6) return;
+          setTimeout(lateClose, 350);
+        };
+        setTimeout(lateClose, 300);
+      }
+      setTimeout(() => scrollTimers.forEach(clearTimeout), 1200);
     }
   }
 

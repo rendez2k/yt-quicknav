@@ -161,6 +161,21 @@
 
 #yqn-cut-panel .yqn-cp-body { padding: 6px 0 8px; }
 
+#yqn-cut-panel .yqn-cp-retry-wrap { padding: 2px 14px 8px; }
+#yqn-cut-panel .yqn-cp-retry {
+  border: 1px solid var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.15));
+  border-radius: 14px;
+  padding: 4px 12px;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--yt-spec-text-primary, #0f0f0f);
+}
+#yqn-cut-panel .yqn-cp-retry:hover {
+  background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.06));
+}
+
 #yqn-cut-panel .yqn-cp-msg {
   padding: 12px 14px;
   color: var(--yt-spec-text-secondary, #606060);
