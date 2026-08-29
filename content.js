@@ -457,6 +457,13 @@
       body.innerHTML = `<div class="yqn-cp-msg">Analysing this video…</div>`;
     } else if (!cutPlan.segments.length) {
       body.innerHTML = `<div class="yqn-cp-msg">${emptyReason(false)}</div>`;
+      const diagText = diagString();
+      if (diagText) {
+        const diag = document.createElement("div");
+        diag.className = "yqn-cp-diag";
+        diag.textContent = diagText;
+        body.appendChild(diag);
+      }
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "yqn-cp-retry";
@@ -966,6 +973,14 @@
       `xml:${d.ttXmlStatus != null ? d.ttXmlStatus : "-"}/${d.xmlNodes != null ? d.xmlNodes : "-"}`,
       `lines:${i.transcriptLines}(${i.transcriptSrc || "-"})`,
     ];
+    if (i.aiEnabled && i.transcriptLines > 0) {
+      parts.push(
+        `AI:${i.aiSkips != null ? i.aiSkips : "-"}skip/` +
+          `${i.aiHighlights != null ? i.aiHighlights : "-"}hl→` +
+          `${i.aiCut != null ? i.aiCut : "-"}seg`
+      );
+    }
+    if (i.duration != null) parts.push(`dur:${i.duration}s`);
     if (d.timedtextStatus != null) parts.push(`json3:${d.timedtextStatus}/${d.transcriptEvents}`);
     if (d.nextError) parts.push(`nextErr:${d.nextError}`);
     if (d.playability) parts.push(`play:${d.playability}`);
@@ -984,6 +999,12 @@
     if (i.aiEnabled) {
       if (i.transcriptLines === 0) {
         return "Nothing to cut — this video has no captions for AI, and no SponsorBlock/most-replayed data.";
+      }
+      if (i.duration === 0) {
+        return "Nothing to cut — the player hadn't reported the video length yet, so speed-throughs couldn't be placed. Hit ↻ Re-analyse.";
+      }
+      if ((i.aiHighlights || 0) > 0 && (i.aiSkips || 0) === 0 && i.aiCut === 0) {
+        return `Nothing to cut — AI marked the whole video worth watching (${i.aiHighlights} highlight${i.aiHighlights === 1 ? "" : "s"}, no junk, no gaps long enough to speed).`;
       }
       // AI ran but found nothing worth cutting.
       return "Nothing to cut — AI found no clear junk or filler to trim.";
@@ -1480,10 +1501,11 @@
       transcript: (pageData && pageData.transcript && pageData.transcript.length) || 0,
     });
 
-    const duration = (() => {
-      const v = getVideoEl();
-      return v && isFinite(v.duration) ? v.duration : 0;
-    })();
+    // Await the real duration — a synchronous read of 0 (metadata not loaded
+    // yet) silently disables every AI speed-through, since gaps outside
+    // highlights can't be computed without knowing where the video ends.
+    const duration = await getVideoDuration(4000);
+    info.duration = Math.round(duration);
 
     if ((settings.cutBoring || settings.autoCutPlus) && pageData && pageData.heatmap) {
       info.heatmapPoints = pageData.heatmap.length;
@@ -1513,6 +1535,8 @@
         if (ai) {
           const aiSegs = segmentsFromAI(ai, duration);
           info.aiCut = aiSegs.length;
+          info.aiHighlights = ai.highlights.length;
+          info.aiSkips = ai.skip.length;
           info.aiModelUsed = settings.aiModel || "claude-haiku-4-5-20251001";
           info.aiSummary = ai.summary || "";
           segs.push(...aiSegs);
