@@ -6,6 +6,11 @@
   align-items: center;
 }
 
+#yqn-quick-bar .yqn-pill-compact {
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
 #yqn-quick-bar .yqn-pill {
   display: inline-flex;
   align-items: center;

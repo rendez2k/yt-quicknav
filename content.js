@@ -19,6 +19,7 @@
     showToggle: true,
     showCopyLink: true,
     showPeak: true,
+    showJump: true,
     // Auto-Cut
     showCut: true,
     autoCut: false,
@@ -154,7 +155,8 @@
         settings.showToggle ||
         settings.showCut ||
         settings.showCopyLink ||
-        settings.showPeak)
+        settings.showPeak ||
+        settings.showJump)
     ) {
       const sep = document.createElement("span");
       sep.className = "yqn-sep";
@@ -229,7 +231,63 @@
       bar.appendChild(btn);
     }
 
+    if (settings.showJump) {
+      const mk = (id, icon, title, dir) => {
+        const btn = document.createElement("button");
+        btn.id = id;
+        btn.className = "yqn-pill yqn-pill-action yqn-pill-compact";
+        btn.type = "button";
+        btn.title = title;
+        btn.innerHTML = `<span class="yqn-ico">${icon}</span>`;
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          jumpChapter(dir);
+        });
+        bar.appendChild(btn);
+      };
+      mk(
+        "yqn-back-btn",
+        "⏮",
+        "Back to the start of this chapter — press again for the previous one (no chapters: back 60s)",
+        -1
+      );
+      mk("yqn-fwd-btn", "⏭", "Jump to the next chapter (no chapters: forward 60s)", 1);
+    }
+
     return bar;
+  }
+
+  // Previous/next hop through the AI chapters; ±60s when a video has none.
+  // Back behaves like a music player: first press returns to the start of the
+  // current chapter, pressing again (near its start) goes to the previous one.
+  function jumpChapter(dir) {
+    const v = getVideoEl();
+    if (!v) return;
+    const t = v.currentTime || 0;
+    const chapters =
+      (cutPlan && cutPlan.videoId === getVideoId() && cutPlan.chapters) || [];
+    if (chapters.length) {
+      if (dir > 0) {
+        const next = chapters.find((c) => c.start > t + 1);
+        if (!next) {
+          toast("No later chapter", 1400);
+          return;
+        }
+        v.currentTime = next.start + 0.05;
+        toast("⏭ " + next.title, 2000);
+      } else {
+        const before = chapters.filter((c) => c.start < t - 3);
+        const target = before.length ? before[before.length - 1] : null;
+        v.currentTime = target ? target.start + 0.05 : 0;
+        toast("⏮ " + (target ? target.title : "Start"), 2000);
+      }
+      if (v.play) v.play().catch(() => {});
+      return;
+    }
+    // No chapters for this video — plain one-minute hop.
+    const max = isFinite(v.duration) && v.duration > 1 ? v.duration - 1 : Infinity;
+    v.currentTime = Math.max(0, Math.min(max, t + dir * 60));
+    toast(dir > 0 ? "⏭ 1 min" : "⏮ 1 min", 1200);
   }
 
   /* ---------- Jump to peak (most-replayed) ---------- */

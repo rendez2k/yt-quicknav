@@ -9,6 +9,7 @@ const DEFAULTS = {
   showToggle: true,
   showCopyLink: true,
   showPeak: true,
+  showJump: true,
   showCut: true,
   autoCut: false,
   cutMessaging: true,

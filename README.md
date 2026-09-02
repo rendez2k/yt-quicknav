@@ -53,7 +53,9 @@ dull parts. Sources (each toggleable in the popup):
   and **AI chapter markers** — 3-12 topical chapters ("Tool 3: Cursor",
   "Pricing comparison") for videos whose creator didn't add any. They appear as
   clickable rows in the panel and as blue ticks on the progress bar, so you can
-  jump to (or straight past) any topic.
+  jump to (or straight past) any topic. The ⏮/⏭ quick-bar buttons hop through
+  them — ⏮ returns to the current chapter's start (again for the previous one),
+  ⏭ jumps to the next; on videos without chapters they hop ±60 seconds.
 
 Skipped junk jumps silently (with a small toast); dull/off-highlight parts play
 at your chosen speed-through rate. Toggle per video with the ✂️ button, or leave
