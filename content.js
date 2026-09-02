@@ -385,6 +385,35 @@
     closeCutPanel();
   }
 
+  // Clickable AI chapter list — jump to (or past) a topic on videos whose
+  // creator didn't add chapter markers.
+  function appendChapterList(body) {
+    const chapters = cutPlan && cutPlan.chapters;
+    if (!chapters || !chapters.length) return;
+    const head = document.createElement("div");
+    head.className = "yqn-cp-chaphead";
+    head.textContent = "Chapters (AI)";
+    body.appendChild(head);
+    for (const c of chapters) {
+      const row = document.createElement("div");
+      row.className = "yqn-cp-chap";
+      row.innerHTML =
+        `<span class="yqn-cp-time">${fmtTime(c.start)}</span>` +
+        `<span class="yqn-cp-chaptitle"></span>`;
+      row.querySelector(".yqn-cp-chaptitle").textContent = c.title;
+      row.title = "Jump to " + fmtTime(c.start);
+      row.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const v = getVideoEl();
+        if (v) {
+          v.currentTime = c.start + 0.05;
+          if (v.play) v.play().catch(() => {});
+        }
+      });
+      body.appendChild(row);
+    }
+  }
+
   // Human name for the AI model that produced a plan, shown in the panel so
   // different models' cut quality can be compared.
   function shortModelName(id) {
@@ -480,6 +509,7 @@
       retryWrap.className = "yqn-cp-retry-wrap";
       retryWrap.appendChild(retry);
       body.appendChild(retryWrap);
+      appendChapterList(body);
     } else {
       if (cutPlan.summary) {
         const summary = document.createElement("div");
@@ -522,6 +552,7 @@
           list.appendChild(row);
         });
       body.appendChild(list);
+      appendChapterList(body);
     }
 
     panel.innerHTML = "";
@@ -898,10 +929,9 @@
   const CUT_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
   const CUT_CACHE_MAX = 300;
 
-  // v6 key: older plans were built with the segment-merge bug (speeds
-  // swallowed into skips) and spike-relative heatmap thresholds baked in —
-  // drop them so videos re-analyse with the fixed pipeline.
-  const CUT_CACHE_KEY = "cutCacheV6";
+  // v7 key: plans now carry AI chapter markers — drop older entries so
+  // videos re-analyse and get chapters.
+  const CUT_CACHE_KEY = "cutCacheV7";
 
   function getCachedPlan(videoId) {
     return new Promise((resolve) => {
@@ -914,6 +944,7 @@
             segments: hit.segments,
             aiModel: hit.aiModel || null,
             summary: hit.summary || null,
+            chapters: hit.chapters || null,
           });
         } else {
           resolve(null);
@@ -922,7 +953,7 @@
     });
   }
 
-  function setCachedPlan(videoId, segments, aiModel, summary) {
+  function setCachedPlan(videoId, segments, aiModel, summary, chapters) {
     // Never cache empty plans — a transient failure shouldn't stick.
     if (!segments || !segments.length) return;
     localGet({ [CUT_CACHE_KEY]: {} }, (store) => {
@@ -932,6 +963,7 @@
         ts: Date.now(),
         aiModel: aiModel || null,
         summary: summary || null,
+        chapters: chapters && chapters.length ? chapters : null,
       };
       const keys = Object.keys(cache);
       if (keys.length > CUT_CACHE_MAX) {
@@ -1117,6 +1149,7 @@
         segments: maybeSpeedOnly(cached.segments),
         aiModel: cached.aiModel,
         summary: cached.summary,
+        chapters: cached.chapters,
       };
       dlog("[YQN] cut plan (cached)", { videoId, segments: cutPlan.segments });
       announcePlan(cutPlan.segments, true);
@@ -1130,14 +1163,15 @@
       if (getVideoId() !== videoId || !settings.autoCut) return;
       const aiModel = (lastPlanInfo && lastPlanInfo.aiModelUsed) || null;
       const summary = (lastPlanInfo && lastPlanInfo.aiSummary) || null;
-      cutPlan = { videoId, segments: maybeSpeedOnly(segments), aiModel, summary };
+      const chapters = (lastPlanInfo && lastPlanInfo.aiChaptersArr) || null;
+      cutPlan = { videoId, segments: maybeSpeedOnly(segments), aiModel, summary, chapters };
       // Only cache a *complete* plan. If AI was enabled but the transcript
       // came back empty (a fetch failure, not genuinely no captions), don't
       // cache — otherwise a partial SponsorBlock-only plan gets stuck and AI
       // never retries on revisits.
       const aiIncomplete =
         lastPlanInfo && lastPlanInfo.aiEnabled && lastPlanInfo.transcriptLines === 0;
-      if (!aiIncomplete) setCachedPlan(videoId, segments, aiModel, summary);
+      if (!aiIncomplete) setCachedPlan(videoId, segments, aiModel, summary, chapters);
       dlog("[YQN] cut plan", { videoId, segments, cached: !aiIncomplete });
       announcePlan(cutPlan.segments, false);
       scheduleMarkerRender();
@@ -1539,6 +1573,7 @@
           info.aiSkips = ai.skip.length;
           info.aiModelUsed = settings.aiModel || "claude-haiku-4-5-20251001";
           info.aiSummary = ai.summary || "";
+          info.aiChaptersArr = ai.chapters || [];
           segs.push(...aiSegs);
         } else {
           dlog("[YQN] AI highlights: no result (timeout or error)");
@@ -1725,8 +1760,20 @@
           additionalProperties: false,
         },
       },
+      chapters: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            start: { type: "number" },
+            title: { type: "string" },
+          },
+          required: ["start", "title"],
+          additionalProperties: false,
+        },
+      },
     },
-    required: ["summary", "highlights", "skip"],
+    required: ["summary", "highlights", "skip", "chapters"],
     additionalProperties: false,
   };
 
@@ -1751,8 +1798,14 @@
     const sys =
       "You edit a YouTube video down to its worthwhile parts using its " +
       "timestamped transcript. Return ONLY JSON of the form " +
-      '{"summary":s,"highlights":[{"start":n,"end":n}],"skip":[{"start":n,"end":n,"reason":s}]} ' +
+      '{"summary":s,"highlights":[{"start":n,"end":n}],"skip":[{"start":n,"end":n,"reason":s}],"chapters":[{"start":n,"title":s}]} ' +
       "with times in seconds. " +
+      "chapters = 3-12 topical markers spanning the whole video, one at each " +
+      "real topic change, with concrete 2-6 word titles that let a viewer " +
+      'jump to or past a topic (e.g. "Tool 3: Cursor", "Pricing comparison" ' +
+      '- never vague ones like "Introduction continues"). The first chapter ' +
+      "starts at 0. If the creator covers a numbered list of items, give " +
+      "each item its own chapter. " +
       "summary = 2-3 plain sentences on what the video actually covers and " +
       "its main takeaways - concrete, no fluff, no 'this video...' framing. " +
       "highlights = the genuinely interesting/substantive moments worth " +
@@ -1817,10 +1870,26 @@
           end: +r.end,
           reason: typeof r.reason === "string" ? r.reason.slice(0, 60) : undefined,
         }));
+    const cleanChapters = (arr) =>
+      (Array.isArray(arr) ? arr : [])
+        .filter(
+          (c) =>
+            c &&
+            isFinite(c.start) &&
+            c.start >= 0 &&
+            (!duration || c.start < duration) &&
+            typeof c.title === "string" &&
+            c.title.trim()
+        )
+        .map((c) => ({ start: +c.start, title: c.title.trim().slice(0, 80) }))
+        .sort((a, b) => a.start - b.start)
+        .filter((c, i, a) => i === 0 || c.start - a[i - 1].start >= 10) // ≥10s apart
+        .slice(0, 20);
     const out = {
       highlights: clean(obj.highlights),
       skip: clean(obj.skip),
       summary: typeof obj.summary === "string" ? obj.summary.slice(0, 800) : "",
+      chapters: cleanChapters(obj.chapters),
     };
     // Don't fast-forward the part of the video the model never saw.
     if (truncated && duration - seenUpTo > 1) {
@@ -1997,7 +2066,9 @@
 
   function renderCutMarkers() {
     removeCutMarkers();
-    if (!settings.autoCut || !cutPlan || !cutPlan.segments.length) return;
+    const chapters = (cutPlan && cutPlan.chapters) || [];
+    if (!settings.autoCut || !cutPlan || (!cutPlan.segments.length && !chapters.length))
+      return;
     const bar =
       document.querySelector(".ytp-progress-bar") ||
       document.querySelector(".ytp-progress-bar-container");
@@ -2020,6 +2091,15 @@
       m.title = (s.action === "skip" ? "Skip: " : "Speed: ") + (s.reason || "");
       wrap.appendChild(m);
     }
+    // AI chapter ticks (skip the one at 0 — it'd just mark the bar's edge).
+    for (const c of chapters) {
+      if (c.start < 1) continue;
+      const t = document.createElement("div");
+      t.className = "yqn-chap-tick";
+      t.style.left = (100 * c.start) / dur + "%";
+      t.title = c.title;
+      wrap.appendChild(t);
+    }
     bar.appendChild(wrap);
     dlog("[YQN] markers rendered:", wrap.children.length, "dur", Math.round(dur));
   }
@@ -2032,7 +2112,7 @@
       settings.autoCut &&
       cutPlan &&
       cutPlan.videoId === getVideoId() &&
-      cutPlan.segments.length
+      (cutPlan.segments.length || (cutPlan.chapters && cutPlan.chapters.length))
     );
   }
 

@@ -240,6 +240,33 @@
   white-space: nowrap;
 }
 
+#yqn-cut-panel .yqn-cp-chaphead {
+  padding: 10px 14px 2px;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--yt-spec-text-secondary, #606060);
+  border-top: 1px solid var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.08));
+  margin-top: 6px;
+}
+
+#yqn-cut-panel .yqn-cp-chap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+#yqn-cut-panel .yqn-cp-chap:hover {
+  background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.06));
+}
+
+#yqn-cut-panel .yqn-cp-chaptitle {
+  color: var(--yt-spec-text-primary, #0f0f0f);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Auto-Cut markers overlaid on the player progress bar. */
 #yqn-markers {
   position: absolute;
@@ -264,4 +291,15 @@
 
 #yqn-markers .yqn-marker-speed {
   background: #ffb300;
+}
+
+#yqn-markers .yqn-chap-tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  height: auto;
+  width: 2px;
+  background: #3ea6ff;
+  opacity: 0.95;
+  pointer-events: auto;
 }
