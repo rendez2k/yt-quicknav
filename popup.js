@@ -33,6 +33,17 @@ const VALUE_FIELDS = {
   minCutMinutes: "number",
 };
 
+// Reset the per-video ignore + music/short override lists (stored locally).
+const clearBtn = document.getElementById("clearIgnores");
+if (clearBtn) {
+  clearBtn.addEventListener("click", () => {
+    chrome.storage.local.remove(["cutIgnoreV1", "cutAllowV1"], () => {
+      clearBtn.textContent = "Cleared ✓";
+      setTimeout(() => (clearBtn.textContent = "Reset list"), 1500);
+    });
+  });
+}
+
 chrome.storage.sync.get(DEFAULTS, (settings) => {
   for (const key of Object.keys(DEFAULTS)) {
     const el = document.getElementById(key);

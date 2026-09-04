@@ -1195,6 +1195,10 @@
     if (!settings.autoCut || !isWatchPage()) return;
     const videoId = getVideoId();
     if (!videoId || cutPlanningFor === videoId) return;
+    // Claim the video immediately: run() fires on both of YouTube's
+    // navigation events, and without this two overlapping calls could both
+    // reach planning (and both pay for an AI analysis).
+    cutPlanningFor = videoId;
     if (!skipIgnoreCheck) {
       cutIgnored = await isVideoIgnored(videoId);
       cutIgnoredAuto = false;
@@ -1226,9 +1230,14 @@
           }
         }
       }
-      if (getVideoId() !== videoId) return;
+      if (getVideoId() !== videoId) {
+        cutPlanningFor = null;
+        return;
+      }
     }
     if (cutIgnored) {
+      // Release the claim so un-ignoring can re-enter and plan.
+      cutPlanningFor = null;
       cutPlan = null;
       removeCutMarkers();
       setCutTooltip(
@@ -1242,7 +1251,6 @@
       renderCutPanelIfOpen();
       return;
     }
-    cutPlanningFor = videoId;
     cutPlan = null;
     removeCutMarkers();
     setCutTooltip("Auto-Cut — analysing…");
@@ -1297,6 +1305,8 @@
       scheduleMarkerRender();
     } catch (err) {
       dlog("[YQN] cut plan failed:", err && err.message);
+      // Release the claim so the next navigation (or Re-analyse) can retry.
+      if (cutPlanningFor === videoId) cutPlanningFor = null;
       toast("Auto-Cut analysis failed");
     }
   }
@@ -2381,18 +2391,23 @@
     }
     injectBar();
     enableCinema();
-    // Keep the per-video ignore state fresh even when Auto-Cut is off, so the
-    // panel's Ignore button always reflects the current video.
-    const vid = getVideoId();
-    isVideoIgnored(vid).then((ig) => {
-      if (getVideoId() === vid) {
-        cutIgnored = ig;
-        cutIgnoredAuto = false; // auto state is re-derived by startAutoCut
-        cutIgnoredWhy = null;
-        updateCutButton();
-      }
-    });
-    if (settings.autoCut) startAutoCut();
+    if (settings.autoCut) {
+      // startAutoCut owns the ignore-state derivation (user list + music +
+      // short checks). Don't also refresh it here — the two async writes
+      // raced, and this one could clobber the derived auto state.
+      startAutoCut();
+    } else {
+      // Auto-Cut off: keep the Ignore button state fresh for the panel.
+      const vid = getVideoId();
+      isVideoIgnored(vid).then((ig) => {
+        if (getVideoId() === vid && !settings.autoCut) {
+          cutIgnored = ig;
+          cutIgnoredAuto = false;
+          cutIgnoredWhy = null;
+          updateCutButton();
+        }
+      });
+    }
   }
 
   function loadSettings() {
