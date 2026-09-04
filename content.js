@@ -472,6 +472,49 @@
     }
   }
 
+  // Takeaways (bulleted) and mentioned items (linked when the AI could pin a
+  // URL, preferring real links from the video description).
+  function appendAIExtras(body) {
+    const take = cutPlan && cutPlan.takeaways;
+    if (take && take.length) {
+      const head = document.createElement("div");
+      head.className = "yqn-cp-chaphead";
+      head.textContent = "Takeaways";
+      body.appendChild(head);
+      const ul = document.createElement("ul");
+      ul.className = "yqn-cp-takeaways";
+      for (const t of take) {
+        const li = document.createElement("li");
+        li.textContent = t;
+        ul.appendChild(li);
+      }
+      body.appendChild(ul);
+    }
+    const men = cutPlan && cutPlan.mentions;
+    if (men && men.length) {
+      const head = document.createElement("div");
+      head.className = "yqn-cp-chaphead";
+      head.textContent = "Mentioned in this video";
+      body.appendChild(head);
+      for (const m of men) {
+        const row = document.createElement("div");
+        row.className = "yqn-cp-mention";
+        if (m.url) {
+          const a = document.createElement("a");
+          a.href = m.url;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = m.name;
+          a.title = m.url;
+          row.appendChild(a);
+        } else {
+          row.textContent = m.name;
+        }
+        body.appendChild(row);
+      }
+    }
+  }
+
   // Human name for the AI model that produced a plan, shown in the panel so
   // different models' cut quality can be compared.
   function shortModelName(id) {
@@ -568,6 +611,7 @@
       retryWrap.appendChild(retry);
       body.appendChild(retryWrap);
       appendChapterList(body);
+      appendAIExtras(body);
     } else {
       if (cutPlan.summary) {
         const summary = document.createElement("div");
@@ -611,6 +655,7 @@
         });
       body.appendChild(list);
       appendChapterList(body);
+      appendAIExtras(body);
     }
 
     panel.innerHTML = "";
@@ -987,9 +1032,9 @@
   const CUT_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
   const CUT_CACHE_MAX = 300;
 
-  // v7 key: plans now carry AI chapter markers — drop older entries so
-  // videos re-analyse and get chapters.
-  const CUT_CACHE_KEY = "cutCacheV7";
+  // v8 key: plans now carry AI chapters, takeaways and mentions — drop older
+  // entries so videos re-analyse and get the full analysis.
+  const CUT_CACHE_KEY = "cutCacheV8";
 
   function getCachedPlan(videoId) {
     return new Promise((resolve) => {
@@ -1003,6 +1048,8 @@
             aiModel: hit.aiModel || null,
             summary: hit.summary || null,
             chapters: hit.chapters || null,
+            takeaways: hit.takeaways || null,
+            mentions: hit.mentions || null,
           });
         } else {
           resolve(null);
@@ -1011,7 +1058,7 @@
     });
   }
 
-  function setCachedPlan(videoId, segments, aiModel, summary, chapters) {
+  function setCachedPlan(videoId, segments, aiModel, summary, chapters, takeaways, mentions) {
     // Never cache empty plans — a transient failure shouldn't stick.
     if (!segments || !segments.length) return;
     localGet({ [CUT_CACHE_KEY]: {} }, (store) => {
@@ -1022,6 +1069,8 @@
         aiModel: aiModel || null,
         summary: summary || null,
         chapters: chapters && chapters.length ? chapters : null,
+        takeaways: takeaways && takeaways.length ? takeaways : null,
+        mentions: mentions && mentions.length ? mentions : null,
       };
       const keys = Object.keys(cache);
       if (keys.length > CUT_CACHE_MAX) {
@@ -1208,6 +1257,8 @@
         aiModel: cached.aiModel,
         summary: cached.summary,
         chapters: cached.chapters,
+        takeaways: cached.takeaways,
+        mentions: cached.mentions,
       };
       dlog("[YQN] cut plan (cached)", { videoId, segments: cutPlan.segments });
       announcePlan(cutPlan.segments, true);
@@ -1222,14 +1273,25 @@
       const aiModel = (lastPlanInfo && lastPlanInfo.aiModelUsed) || null;
       const summary = (lastPlanInfo && lastPlanInfo.aiSummary) || null;
       const chapters = (lastPlanInfo && lastPlanInfo.aiChaptersArr) || null;
-      cutPlan = { videoId, segments: maybeSpeedOnly(segments), aiModel, summary, chapters };
+      const takeaways = (lastPlanInfo && lastPlanInfo.aiTakeawaysArr) || null;
+      const mentions = (lastPlanInfo && lastPlanInfo.aiMentionsArr) || null;
+      cutPlan = {
+        videoId,
+        segments: maybeSpeedOnly(segments),
+        aiModel,
+        summary,
+        chapters,
+        takeaways,
+        mentions,
+      };
       // Only cache a *complete* plan. If AI was enabled but the transcript
       // came back empty (a fetch failure, not genuinely no captions), don't
       // cache — otherwise a partial SponsorBlock-only plan gets stuck and AI
       // never retries on revisits.
       const aiIncomplete =
         lastPlanInfo && lastPlanInfo.aiEnabled && lastPlanInfo.transcriptLines === 0;
-      if (!aiIncomplete) setCachedPlan(videoId, segments, aiModel, summary, chapters);
+      if (!aiIncomplete)
+        setCachedPlan(videoId, segments, aiModel, summary, chapters, takeaways, mentions);
       dlog("[YQN] cut plan", { videoId, segments, cached: !aiIncomplete });
       announcePlan(cutPlan.segments, false);
       scheduleMarkerRender();
@@ -1622,7 +1684,11 @@
           toast("Auto-Cut: AI analysing transcript…", 4000);
           setCutTooltip("Auto-Cut: AI analysing transcript…");
         }
-        const ai = await withTimeout(aiHighlights(transcript, duration), 40000, null);
+        const ai = await withTimeout(
+          aiHighlights(transcript, duration, (pageData && pageData.description) || ""),
+          40000,
+          null
+        );
         dlog("[YQN] AI result", ai);
         if (ai) {
           const aiSegs = segmentsFromAI(ai, duration);
@@ -1632,6 +1698,8 @@
           info.aiModelUsed = settings.aiModel || "claude-haiku-4-5-20251001";
           info.aiSummary = ai.summary || "";
           info.aiChaptersArr = ai.chapters || [];
+          info.aiTakeawaysArr = ai.takeaways || [];
+          info.aiMentionsArr = ai.mentions || [];
           segs.push(...aiSegs);
         } else {
           dlog("[YQN] AI highlights: no result (timeout or error)");
@@ -1830,12 +1898,25 @@
           additionalProperties: false,
         },
       },
+      takeaways: { type: "array", items: { type: "string" } },
+      mentions: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+            url: { type: "string" },
+          },
+          required: ["name", "url"],
+          additionalProperties: false,
+        },
+      },
     },
-    required: ["summary", "highlights", "skip", "chapters"],
+    required: ["summary", "highlights", "skip", "chapters", "takeaways", "mentions"],
     additionalProperties: false,
   };
 
-  async function aiHighlights(transcript, duration) {
+  async function aiHighlights(transcript, duration, description) {
     // Compact the transcript to timestamped lines. The cap covers hours of
     // speech; when exceeded, the model is told where the transcript ends and
     // the unseen tail is kept at normal speed instead of fast-forwarded.
@@ -1856,8 +1937,16 @@
     const sys =
       "You edit a YouTube video down to its worthwhile parts using its " +
       "timestamped transcript. Return ONLY JSON of the form " +
-      '{"summary":s,"highlights":[{"start":n,"end":n}],"skip":[{"start":n,"end":n,"reason":s}],"chapters":[{"start":n,"title":s}]} ' +
+      '{"summary":s,"highlights":[{"start":n,"end":n}],"skip":[{"start":n,"end":n,"reason":s}],"chapters":[{"start":n,"title":s}],"takeaways":[s],"mentions":[{"name":s,"url":s}]} ' +
       "with times in seconds. " +
+      "takeaways = 3-6 crisp bullets a viewer should remember: the concrete " +
+      "facts, recommendations and conclusions FROM the content, not " +
+      "descriptions of the video. " +
+      "mentions = every distinct product, tool, site, book or resource the " +
+      "speaker discusses: name plus a full https URL. Prefer exact URLs from " +
+      "the description when provided; otherwise use the domain as spoken " +
+      '(e.g. "shadscan dot com" -> "https://shadscan.com"); if genuinely ' +
+      'unknown use "" for url. ' +
       "chapters = 3-12 topical markers spanning the whole video, one at each " +
       "real topic change, with concrete 2-6 word titles that let a viewer " +
       'jump to or past a topic (e.g. "Tool 3: Cursor", "Pricing comparison" ' +
@@ -1888,6 +1977,9 @@
       `Video duration: ${Math.round(duration)}s.\n` +
       (truncated
         ? `The transcript below is truncated at ${Math.round(seenUpTo)}s — only judge what is shown.\n`
+        : "") +
+      (description
+        ? `Video description (often contains the real links for mentions):\n${String(description).slice(0, 5000)}\n\n`
         : "") +
       `Transcript:\n${lines}\n\nReturn the JSON.`;
 
@@ -1943,11 +2035,36 @@
         .sort((a, b) => a.start - b.start)
         .filter((c, i, a) => i === 0 || c.start - a[i - 1].start >= 10) // ≥10s apart
         .slice(0, 20);
+    const cleanTakeaways = (arr) =>
+      (Array.isArray(arr) ? arr : [])
+        .filter((t) => typeof t === "string" && t.trim())
+        .map((t) => t.trim().slice(0, 220))
+        .slice(0, 8);
+    const cleanMentions = (arr) =>
+      (Array.isArray(arr) ? arr : [])
+        .filter((m) => m && typeof m.name === "string" && m.name.trim())
+        .map((m) => {
+          let url = typeof m.url === "string" ? m.url.trim() : "";
+          // Accept bare domains ("shadscan.com"); reject anything that isn't
+          // clearly an http(s) URL so the panel never links to junk.
+          if (url && !/^https?:\/\//i.test(url)) {
+            url = /^[\w-]+(\.[\w-]+)+([/?#]\S*)?$/.test(url) ? "https://" + url : "";
+          }
+          if (!/^https?:\/\/[\w-]+(\.[\w-]+)+/i.test(url)) url = "";
+          return { name: m.name.trim().slice(0, 60), url: url.slice(0, 300) };
+        })
+        .filter(
+          (m, i, a) =>
+            a.findIndex((x) => x.name.toLowerCase() === m.name.toLowerCase()) === i
+        )
+        .slice(0, 15);
     const out = {
       highlights: clean(obj.highlights),
       skip: clean(obj.skip),
       summary: typeof obj.summary === "string" ? obj.summary.slice(0, 800) : "",
       chapters: cleanChapters(obj.chapters),
+      takeaways: cleanTakeaways(obj.takeaways),
+      mentions: cleanMentions(obj.mentions),
     };
     // Don't fast-forward the part of the video the model never saw.
     if (truncated && duration - seenUpTo > 1) {

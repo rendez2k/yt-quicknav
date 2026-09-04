@@ -56,6 +56,10 @@ dull parts. Sources (each toggleable in the popup):
   jump to (or straight past) any topic. The ⏮/⏭ quick-bar buttons hop through
   them — ⏮ returns to the current chapter's start (again for the previous one),
   ⏭ jumps to the next; on videos without chapters they hop ±60 seconds.
+  The panel also lists **Takeaways** (3-6 bullets of the actual conclusions)
+  and **Mentioned in this video** — every product/tool/site the speaker
+  discusses, linked to its real URL when the description carries one (the
+  description is passed to the model alongside the transcript).
 
 Skipped junk jumps silently (with a small toast); dull/off-highlight parts play
 at your chosen speed-through rate. Toggle per video with the ✂️ button, or leave

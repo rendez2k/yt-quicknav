@@ -328,6 +328,12 @@
     if (needTranscript) {
       let tsrc = "none";
 
+      // Video description — often carries the real URLs for things the
+      // speaker mentions, so the AI can link mentions accurately.
+      const prAny = livePr || (freshGlobals ? pr : null);
+      payload.description =
+        (prAny && prAny.videoDetails && prAny.videoDetails.shortDescription) || "";
+
       // 1) get_transcript endpoint — the same API the transcript panel uses,
       //    so it works where the timedtext download is token-gated. Params
       //    come free from ytInitialData on a fresh load, else from `next`.
