@@ -1032,9 +1032,9 @@
   const CUT_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
   const CUT_CACHE_MAX = 300;
 
-  // v8 key: plans now carry AI chapters, takeaways and mentions — drop older
-  // entries so videos re-analyse and get the full analysis.
-  const CUT_CACHE_KEY = "cutCacheV8";
+  // v9 key: plans now include silence detection and the stronger self-promo
+  // rules — drop older entries so videos re-analyse with them.
+  const CUT_CACHE_KEY = "cutCacheV9";
 
   function getCachedPlan(videoId) {
     return new Promise((resolve) => {
@@ -1119,6 +1119,7 @@
           `${i.aiCut != null ? i.aiCut : "-"}seg`
       );
     }
+    if (i.silence != null) parts.push(`silent:${i.silence}`);
     if (i.duration != null) parts.push(`dur:${i.duration}s`);
     if (d.timedtextStatus != null) parts.push(`json3:${d.timedtextStatus}/${d.transcriptEvents}`);
     if (d.nextError) parts.push(`nextErr:${d.nextError}`);
@@ -1652,9 +1653,11 @@
     }
     dlog("[YQN] plan: SponsorBlock", info.sbCount);
 
-    // 2/4) Data that needs the page context (heatmap + transcript).
+    // 2/4) Data that needs the page context (heatmap + transcript). The
+    // transcript is also fetched for "trim dull parts" alone, so silent
+    // stretches can be detected without AI.
     const needHeatmap = !!(settings.cutBoring || settings.autoCutPlus);
-    const needTranscript = info.aiEnabled;
+    const needTranscript = info.aiEnabled || !!settings.cutBoring;
     let pageData = null;
     if (needHeatmap || needTranscript) {
       pageData = await requestAutocutData(videoId, needHeatmap, needTranscript);
@@ -1676,6 +1679,18 @@
       if (pageData.heatmap.length) segs.push(...boringFromHeatmap(pageData.heatmap));
     }
 
+    // Silent stretches: a big jump between caption timestamps means nobody is
+    // talking — a demo or montage that rarely needs real time. Deterministic,
+    // no AI required; the AI can't see inside these gaps anyway.
+    if (settings.cutBoring && !info.aiEnabled) {
+      const t = (pageData && pageData.transcript) || [];
+      if (t.length) {
+        const sil = silenceFromTranscript(t, duration);
+        info.silence = sil.length;
+        segs.push(...sil);
+      }
+    }
+
     if (info.aiEnabled) {
       // Prefer the caption download; fall back to YouTube's transcript panel
       // (which the page can load with its own token when the endpoint can't).
@@ -1688,6 +1703,12 @@
       info.transcriptLines = transcript.length;
 
       dlog(`[YQN] transcript ${transcript.length} lines (${info.transcriptSrc || "-"})`);
+
+      if (settings.cutBoring && transcript.length) {
+        const sil = silenceFromTranscript(transcript, duration);
+        info.silence = sil.length;
+        segs.push(...sil);
+      }
 
       if (transcript.length) {
         if (getVideoId() === videoId && settings.autoCut) {
@@ -1779,6 +1800,44 @@
   async function sha256Hex(str) {
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  /* ----- Silence -> speed. -----
+   * Caption lines carry start times; a long jump between consecutive starts
+   * means nobody is talking (silent demo, montage, b-roll). Speed those
+   * stretches. Conservative: only gaps of 20s+, with an 8s lead so the tail
+   * of the last spoken line isn't clipped, and a 1s buffer before speech
+   * resumes.
+   */
+  function silenceFromTranscript(transcript, duration) {
+    if (!transcript || transcript.length < 3) return [];
+    const MIN_GAP = 20;
+    const LEAD = 8;
+    const ts = transcript
+      .map((t) => +t.start)
+      .filter((s) => isFinite(s))
+      .sort((a, b) => a - b);
+    const out = [];
+    for (let i = 1; i < ts.length; i++) {
+      if (ts[i] - ts[i - 1] >= MIN_GAP) {
+        out.push({
+          start: ts[i - 1] + LEAD,
+          end: ts[i] - 1,
+          action: "speed",
+          reason: "no talking",
+        });
+      }
+    }
+    // Silence after the last caption line until the end of the video.
+    if (duration && duration - ts[ts.length - 1] >= MIN_GAP + LEAD) {
+      out.push({
+        start: ts[ts.length - 1] + LEAD,
+        end: duration,
+        action: "speed",
+        reason: "no talking",
+      });
+    }
+    return out.filter((s) => s.end - s.start >= 10);
   }
 
   /* ----- Most replayed -> tiered trim. -----
@@ -1978,9 +2037,16 @@
           "stretch is borderline junk, skip it rather than keep it. "
         : "") +
       "skip = parts to cut entirely: sponsor reads, subscribe/like/bell " +
-      "reminders, intros, outros, self-promo, dead air, and long off-topic " +
-      "tangents or rambling. Give every skip a concise 2-5 word reason " +
+      "reminders, intros, outros, dead air, long off-topic tangents or " +
+      "rambling, and self-promo of ANY kind - the creator pitching their own " +
+      "community, Discord, course, newsletter, membership, merch or other " +
+      "products counts as self-promo even when it sounds like friendly " +
+      "advice. Give every skip a concise 2-5 word reason " +
       'naming what it is (e.g. "sponsor read", "intro", "repeats earlier point"). ' +
+      "Highlights must contain only substantive content: never let a " +
+      "highlight span a sponsor read, a self-promo pitch, or a stretch where " +
+      "the transcript timestamps jump and nobody is talking - split the " +
+      "highlight around those instead. " +
       "Segments must not overlap and must stay within the video duration. " +
       "No prose.";
     const user =

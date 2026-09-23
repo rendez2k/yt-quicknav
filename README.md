@@ -27,7 +27,9 @@ dull parts. Sources (each toggleable in the popup):
   tangents/filler). Only a privacy-preserving hash of the video ID is sent to
   `sponsor.ajay.app`.
 - **Trim dull parts** — uses YouTube's own "most replayed" graph to speed
-  through low-engagement stretches. Dullness is judged against the local
+  through low-engagement stretches, and speeds through **silent stretches**
+  (20s+ with no caption lines — silent demos, montages, b-roll) detected
+  straight from the transcript timestamps, no AI needed. Dullness is judged against the local
   neighbourhood (a rolling median), not the video's single hottest spike — so
   one viral moment doesn't get the rest of the video cut, flat videos are left
   alone, and only genuine dips are trimmed. No third-party service.
