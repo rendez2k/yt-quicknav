@@ -1032,9 +1032,10 @@
   const CUT_CACHE_TTL = 3 * 24 * 60 * 60 * 1000; // 3 days
   const CUT_CACHE_MAX = 300;
 
-  // v9 key: plans now include silence detection and the stronger self-promo
-  // rules — drop older entries so videos re-analyse with them.
-  const CUT_CACHE_KEY = "cutCacheV9";
+  // v10 key: v1.29.0 could cache plans that sped the entire video (empty AI
+  // highlights + whole-video fallback) — drop them so videos re-analyse with
+  // the coverage guards.
+  const CUT_CACHE_KEY = "cutCacheV10";
 
   function getCachedPlan(videoId) {
     return new Promise((resolve) => {
@@ -1115,7 +1116,8 @@
     if (i.aiEnabled && i.transcriptLines > 0) {
       parts.push(
         `AI:${i.aiSkips != null ? i.aiSkips : "-"}skip/` +
-          `${i.aiHighlights != null ? i.aiHighlights : "-"}hl→` +
+          `${i.aiHighlights != null ? i.aiHighlights : "-"}hl` +
+          `${i.aiHlPct != null ? `(${i.aiHlPct}%)` : ""}→` +
           `${i.aiCut != null ? i.aiCut : "-"}seg`
       );
     }
@@ -1725,6 +1727,12 @@
           const aiSegs = segmentsFromAI(ai, duration);
           info.aiCut = aiSegs.length;
           info.aiHighlights = ai.highlights.length;
+          info.aiHlPct = duration
+            ? Math.round(
+                (100 / duration) *
+                  ai.highlights.reduce((a, h) => a + Math.max(0, h.end - h.start), 0)
+              )
+            : 0;
           info.aiSkips = ai.skip.length;
           info.aiModelUsed = settings.aiModel || "claude-haiku-4-5-20251001";
           info.aiSummary = ai.summary || "";
@@ -1817,6 +1825,14 @@
       .map((t) => +t.start)
       .filter((s) => isFinite(s))
       .sort((a, b) => a - b);
+    if (ts.length < 3) return [];
+    // Only a per-line transcript (typical gap a few seconds) can support
+    // silence inference. A coarse one — paragraph- or chapter-level rows —
+    // makes every gap look like 20s+ of "silence" and ambers the whole video.
+    const gaps = [];
+    for (let i = 1; i < ts.length; i++) gaps.push(ts[i] - ts[i - 1]);
+    const median = gaps.slice().sort((a, b) => a - b)[Math.floor(gaps.length / 2)];
+    if (median > 8) return [];
     const out = [];
     for (let i = 1; i < ts.length; i++) {
       if (ts[i] - ts[i - 1] >= MIN_GAP) {
@@ -1837,7 +1853,14 @@
         reason: "no talking",
       });
     }
-    return out.filter((s) => s.end - s.start >= 10);
+    const found = out.filter((s) => s.end - s.start >= 10);
+    // Silence covering nearly the whole video means the transcript is
+    // untrustworthy, not that the video is that silent. Lenient on purpose:
+    // a demo-heavy video can legitimately be half silence — the median-gap
+    // check above is the real guard against coarse transcripts.
+    const total = found.reduce((a, s) => a + (s.end - s.start), 0);
+    if (duration && total > duration * 0.7) return [];
+    return found;
   }
 
   /* ----- Most replayed -> tiered trim. -----
@@ -2046,7 +2069,10 @@
       "Highlights must contain only substantive content: never let a " +
       "highlight span a sponsor read, a self-promo pitch, or a stretch where " +
       "the transcript timestamps jump and nobody is talking - split the " +
-      "highlight around those instead. " +
+      "highlight around those instead. But splitting means trimming, never " +
+      "abandoning: a normal video ALWAYS has several highlights, and an " +
+      "empty or near-empty highlights list is wrong unless the video truly " +
+      "is wall-to-wall junk. " +
       "Segments must not overlap and must stay within the video duration. " +
       "No prose.";
     const user =
@@ -2162,14 +2188,18 @@
     return segs;
   }
 
-  // Speed through everything outside the AI's highlights. An empty highlight
-  // list means nothing is worth normal speed, so the whole video is sped
-  // (skips still win on overlap via normalizeSegments) — previously this case
-  // sped nothing at all.
+  // Speed through everything outside the AI's highlights.
   function speedOutsideHighlights(highlights, duration) {
     if (!duration) return [];
     const MIN_GAP = 5; // shorter dull stretches aren't worth the rate flicker
     const keep = [...highlights].sort((a, b) => a.start - b.start);
+    // Highlights covering almost none of the runtime mean the model's
+    // highlight channel failed, not that the whole video is junk — speeding
+    // "everything outside" would fast-forward the entire video. Skips still
+    // apply, and the deterministic sources (heatmap, silence) keep providing
+    // speed-throughs.
+    const covered = keep.reduce((a, h) => a + Math.max(0, h.end - h.start), 0);
+    if (covered < duration * 0.1) return [];
     const gaps = [];
     let cursor = 0;
     for (const h of keep) {
