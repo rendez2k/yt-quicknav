@@ -18,7 +18,44 @@
   // Capture YouTube's own get_transcript response (full transcript, no DOM
   // rendering/visibility needed) by wrapping fetch. Installed at
   // document_start so it sees the request whenever the panel loads.
+  // Timedtext (caption) traffic is captured the same way: the player's own
+  // requests carry the pot (proof-of-origin) token that plain baseUrl
+  // requests now lack — without it YouTube answers 200 with an empty body.
   window.__yqnTx = null;
+  window.__yqnTt = null; // {videoId, segs} from the player's caption traffic
+
+  function captureTimedtext(url, body) {
+    try {
+      const u = new URL(url, location.origin);
+      const vid = u.searchParams.get("v");
+      if (!vid || !body) return;
+      let segs = [];
+      if (body.charAt(0) === "{") {
+        const tj = JSON.parse(body);
+        segs = (tj.events || [])
+          .filter((ev) => ev.segs)
+          .map((ev) => ({
+            start: (ev.tStartMs || 0) / 1000,
+            text: ev.segs.map((s) => s.utf8 || "").join("").replace(/\s+/g, " ").trim(),
+          }))
+          .filter((x) => x.text);
+      } else if (body.indexOf("<text") !== -1) {
+        const re = /<text[^>]*\bstart="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+        let m;
+        while ((m = re.exec(body))) {
+          const text = decodeEntities(m[2].replace(/<[^>]+>/g, ""))
+            .replace(/\s+/g, " ")
+            .trim();
+          if (text) segs.push({ start: parseFloat(m[1]) || 0, text });
+        }
+      }
+      if (segs.length) {
+        window.__yqnTt = { videoId: vid, segs };
+        dlog("[YQN] captured timedtext:", segs.length, "lines for", vid);
+      }
+    } catch {}
+  }
+
   (function patchFetchForTranscript() {
     const of = window.fetch;
     if (!of) return;
@@ -36,6 +73,10 @@
               }
             })
             .catch(() => {});
+        } else if (url.indexOf("/api/timedtext") !== -1) {
+          p.then((r) => r.clone().text())
+            .then((body) => captureTimedtext(url, body))
+            .catch(() => {});
         }
       } catch {}
       return p;
@@ -50,10 +91,19 @@
     XHR.prototype.open = function (method, url) {
       this.__yqnIsTx =
         typeof url === "string" && url.indexOf("/youtubei/v1/get_transcript") !== -1;
+      this.__yqnTtUrl =
+        typeof url === "string" && url.indexOf("/api/timedtext") !== -1 ? url : null;
       return open.apply(this, arguments);
     };
     const send = XHR.prototype.send;
     XHR.prototype.send = function () {
+      if (this.__yqnTtUrl) {
+        this.addEventListener("load", () => {
+          try {
+            captureTimedtext(this.__yqnTtUrl, this.responseText);
+          } catch {}
+        });
+      }
       if (this.__yqnIsTx) {
         this.addEventListener("load", () => {
           try {
@@ -254,6 +304,47 @@
     return [];
   }
 
+  // Make the player load a caption track with its own (pot-signed) request,
+  // wait for the interceptor to capture the response, then restore state.
+  // Captions may flash on for under a second — a fair trade against wrongly
+  // reporting "no captions" on a video that has 21 caption tracks.
+  async function nudgePlayerCaptions(videoId, track, diag) {
+    const p = getMoviePlayer();
+    if (!p || typeof p.loadModule !== "function" || typeof p.setOption !== "function") {
+      return null;
+    }
+    let wasOn = false;
+    try {
+      const cur = p.getOption("captions", "track");
+      wasOn = !!(cur && cur.languageCode);
+    } catch {}
+    try {
+      p.loadModule("captions");
+      p.setOption("captions", "track", { languageCode: track.languageCode || "en" });
+    } catch (e) {
+      diag.nudgeErr = e && e.message;
+      return null;
+    }
+    let got = null;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3500) {
+      const tt = window.__yqnTt;
+      if (tt && tt.videoId === videoId && tt.segs && tt.segs.length) {
+        got = tt.segs;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    try {
+      if (!wasOn) {
+        p.setOption("captions", "track", {});
+        p.unloadModule("captions");
+      }
+    } catch {}
+    diag.nudge = got ? got.length : 0;
+    return got;
+  }
+
   function getMoviePlayer() {
     const el = document.getElementById("movie_player") ||
       document.querySelector(".html5-video-player");
@@ -367,7 +458,19 @@
         }
       }
 
-      // 2) caption track download (fallback; often token-gated now)
+      // 2) captions the player already downloaded for its own display —
+      //    those requests carried a valid pot token, so they work even when
+      //    the direct download below is token-gated.
+      if (!payload.transcript.length) {
+        const tt = window.__yqnTt;
+        if (tt && tt.videoId === videoId && tt.segs && tt.segs.length) {
+          payload.transcript = tt.segs;
+          tsrc = "player-captions";
+          diag.ttCaptured = tt.segs.length;
+        }
+      }
+
+      // 3) caption track download (often token-gated now — empty 200s)
       if (!payload.transcript.length) {
         let tracks =
           (livePr && deepFindArray(livePr, "captionTracks")) ||
@@ -388,6 +491,18 @@
             tracks.find((t) => (t.languageCode || "").startsWith("en")) || tracks[0];
           payload.transcript = await fetchTranscript(track.baseUrl, diag);
           if (payload.transcript.length) tsrc = "captions";
+
+          // 4) last resort: ask the player itself to load the caption track.
+          //    Its request carries a valid pot token and the interceptor
+          //    above captures the response; the module is unloaded straight
+          //    after so nothing visibly changes for long.
+          if (!payload.transcript.length) {
+            const got = await nudgePlayerCaptions(videoId, track, diag);
+            if (got) {
+              payload.transcript = got;
+              tsrc = "player-nudge";
+            }
+          }
         }
       }
 

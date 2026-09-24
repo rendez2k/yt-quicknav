@@ -1121,6 +1121,14 @@
           `${i.aiCut != null ? i.aiCut : "-"}seg`
       );
     }
+    if (d.transcriptParams != null) {
+      parts.push(
+        `gt:${d.transcriptParams ? "p" : "-"}/` +
+          `${d.getTranscript != null ? d.getTranscript : d.getTranscriptErr ? "err" : "-"}`
+      );
+    }
+    if (d.ttCaptured != null) parts.push(`ttcap:${d.ttCaptured}`);
+    if (d.nudge != null) parts.push(`nudge:${d.nudge}`);
     if (i.silence != null) parts.push(`silent:${i.silence}`);
     if (i.duration != null) parts.push(`dur:${i.duration}s`);
     if (d.timedtextStatus != null) parts.push(`json3:${d.timedtextStatus}/${d.transcriptEvents}`);
@@ -1140,6 +1148,14 @@
 
     if (i.aiEnabled) {
       if (i.transcriptLines === 0) {
+        const d = i.diag || {};
+        if ((d.captionTracks || 0) > 0 || (d.getTranscript || 0) > 0) {
+          return (
+            "Nothing to cut — this video has captions, but YouTube wouldn't hand " +
+            "them over this time (token-gated download). Hit ↻ Re-analyse; turning " +
+            "captions (CC) on briefly also lets the retry capture them."
+          );
+        }
         return "Nothing to cut — this video has no captions for AI, and no SponsorBlock/most-replayed data.";
       }
       if (i.duration === 0) {
