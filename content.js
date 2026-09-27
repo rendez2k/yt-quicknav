@@ -1120,6 +1120,7 @@
           `${i.aiHlPct != null ? `(${i.aiHlPct}%)` : ""}→` +
           `${i.aiCut != null ? i.aiCut : "-"}seg`
       );
+      if (i.aiError) parts.push(`aiErr:${i.aiError}`);
     }
     if (d.transcriptParams != null) {
       parts.push(
@@ -1160,6 +1161,16 @@
       }
       if (i.duration === 0) {
         return "Nothing to cut — the player hadn't reported the video length yet, so speed-throughs couldn't be placed. Hit ↻ Re-analyse.";
+      }
+      if (i.aiError) {
+        return `Nothing to cut — the AI analysis didn't complete (${i.aiError}). Hit ↻ Re-analyse.`;
+      }
+      if ((i.aiHighlights || 0) > 0 && (i.aiHlPct || 0) < 10 && i.aiCut === 0) {
+        return (
+          `Nothing to cut — AI highlights covered only ${i.aiHlPct || 0}% of the ` +
+          "runtime, too sparse to trust for speeding the rest. Hit ↻ Re-analyse " +
+          "(or try the Sonnet model in the popup)."
+        );
       }
       if ((i.aiHighlights || 0) > 0 && (i.aiSkips || 0) === 0 && i.aiCut === 0) {
         return `Nothing to cut — AI marked the whole video worth watching (${i.aiHighlights} highlight${i.aiHighlights === 1 ? "" : "s"}, no junk, no gaps long enough to speed).`;
@@ -1312,11 +1323,13 @@
         mentions,
       };
       // Only cache a *complete* plan. If AI was enabled but the transcript
-      // came back empty (a fetch failure, not genuinely no captions), don't
-      // cache — otherwise a partial SponsorBlock-only plan gets stuck and AI
-      // never retries on revisits.
+      // came back empty (a fetch failure, not genuinely no captions) or the
+      // AI call itself errored/timed out, don't cache — otherwise a partial
+      // SponsorBlock-only plan gets stuck and AI never retries on revisits.
       const aiIncomplete =
-        lastPlanInfo && lastPlanInfo.aiEnabled && lastPlanInfo.transcriptLines === 0;
+        lastPlanInfo &&
+        lastPlanInfo.aiEnabled &&
+        (lastPlanInfo.transcriptLines === 0 || lastPlanInfo.aiError);
       if (!aiIncomplete)
         setCachedPlan(videoId, segments, aiModel, summary, chapters, takeaways, mentions);
       dlog("[YQN] cut plan", { videoId, segments, cached: !aiIncomplete });
@@ -1733,12 +1746,21 @@
           toast("Auto-Cut: AI analysing transcript…", 4000);
           setCutTooltip("Auto-Cut: AI analysing transcript…");
         }
-        const ai = await withTimeout(
-          aiHighlights(transcript, duration, (pageData && pageData.description) || ""),
-          40000,
-          null
-        );
-        dlog("[YQN] AI result", ai);
+        // Long videos + the full structured response (cuts, chapters,
+        // takeaways, mentions) regularly need more than the old 40s budget —
+        // and a failure must be reported as one, not as "AI found nothing".
+        let ai = null;
+        try {
+          ai = await Promise.race([
+            aiHighlights(transcript, duration, (pageData && pageData.description) || ""),
+            new Promise((_, rej) =>
+              setTimeout(() => rej(new Error("timed out after 90s")), 90000)
+            ),
+          ]);
+        } catch (e) {
+          info.aiError = (e && e.message) || "failed";
+        }
+        dlog("[YQN] AI result", ai || info.aiError);
         if (ai) {
           const aiSegs = segmentsFromAI(ai, duration);
           info.aiCut = aiSegs.length;
