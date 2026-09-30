@@ -5,6 +5,13 @@ A Chrome (Manifest V3) extension that:
 - Adds a row of quick-access pill buttons under the video title on YouTube watch pages:
   **History · Watch Later · Subscriptions · Liked · Library · Like · Watch Later: toggle · Copy Link · Peak**
 - Auto-opens videos in **cinema (theater) mode**.
+- **🔊 Volume boost** — amplifies the player's audio beyond YouTube's 100%
+  (up to 300%), like the standalone "volume booster" extensions, via a Web
+  Audio gain node. Off by default; pick the level in the popup.
+- **🎚️ Even out loudness** — a VLC-style compressor that squashes loud
+  moments so quiet dialogue and loud action sit closer together. Pairs well
+  with a modest boost as make-up gain. Everything runs locally in the player;
+  no audio ever leaves the page.
 
 The **Copy Link** button copies a shareable URL to the current video **at the
 current playback time** (`…/watch?v=…&t=123s`) to your clipboard in one click.

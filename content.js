@@ -33,6 +33,8 @@
     anthropicKey: "",
     aiModel: "claude-haiku-4-5-20251001",
     speedRate: 3,
+    volumeBoost: 100, // % — 100 = off, up to 300
+    volumeLevel: false, // compressor that evens out quiet vs loud parts
     debug: false,
   };
 
@@ -929,6 +931,69 @@
 
   function getVideoEl() {
     return document.querySelector("video.html5-main-video, video");
+  }
+
+  /* ---------- volume boost + loudness leveller (Web Audio) ---------- */
+  // The player's <video> is routed through compressor + gain nodes lazily,
+  // the first time either feature is switched on. Routing an element is
+  // permanent (createMediaElementSource is one-shot per element), so with
+  // both features off again the chain is kept transparent: gain 1,
+  // compressor neutral. One shared AudioContext serves every element.
+  let audioCtx = null;
+  let audioComp = null;
+  let audioGain = null;
+  let audioRoutedEl = null;
+
+  function applyAudioChain() {
+    const boost = Math.max(1, Math.min(3, (+settings.volumeBoost || 100) / 100));
+    const level = !!settings.volumeLevel;
+    // Never touched the audio path and nothing is enabled: stay out of it.
+    if (!audioCtx && boost === 1 && !level) return;
+    const v = getVideoEl();
+    if (!v) return;
+    try {
+      if (!audioCtx) {
+        audioCtx = new AudioContext();
+        audioComp = audioCtx.createDynamicsCompressor();
+        audioGain = audioCtx.createGain();
+        audioComp.connect(audioGain);
+        audioGain.connect(audioCtx.destination);
+      }
+      if (audioRoutedEl !== v) {
+        // A fresh <video> (YouTube occasionally swaps it) needs its own
+        // source node; the old one is collected with its element.
+        audioCtx.createMediaElementSource(v).connect(audioComp);
+        audioRoutedEl = v;
+        // Autoplay policy can leave the context suspended until a user
+        // gesture — resume whenever playback (re)starts.
+        v.addEventListener("play", () => {
+          if (audioCtx) audioCtx.resume().catch(() => {});
+        });
+      }
+      const t = audioCtx.currentTime;
+      if (level) {
+        // Leveller: squash loud peaks so quiet dialogue and loud action sit
+        // closer together (VLC-style normalisation). The boost gain then
+        // acts as make-up gain.
+        audioComp.threshold.setValueAtTime(-24, t);
+        audioComp.knee.setValueAtTime(30, t);
+        audioComp.ratio.setValueAtTime(12, t);
+        audioComp.attack.setValueAtTime(0.003, t);
+        audioComp.release.setValueAtTime(0.25, t);
+      } else {
+        // Neutral: 1:1 ratio at 0dB threshold passes audio unchanged.
+        audioComp.threshold.setValueAtTime(0, t);
+        audioComp.knee.setValueAtTime(0, t);
+        audioComp.ratio.setValueAtTime(1, t);
+      }
+      audioGain.gain.setValueAtTime(boost, t);
+      audioCtx.resume().catch(() => {});
+      dlog("[YQN] audio chain", { boost, level });
+    } catch (e) {
+      // Most likely another volume extension already claimed this element —
+      // two boosters can't share one <video>.
+      dlog("[YQN] audio chain failed:", e && e.message);
+    }
   }
 
   function toggleAutoCut() {
@@ -2461,6 +2526,8 @@
     // Fallback poll (also keeps the button label in sync).
     if (!scheduleMarkerRender._keeper) {
       scheduleMarkerRender._keeper = setInterval(() => {
+        // Browse/home pages have nothing to keep alive — skip the DOM work.
+        if (!isWatchPage()) return;
         updateCutButton();
         if (markersWanted() && !document.getElementById("yqn-markers")) {
           renderCutMarkers();
@@ -2525,6 +2592,7 @@
     }
     injectBar();
     enableCinema();
+    applyAudioChain();
     if (settings.autoCut) {
       // startAutoCut owns the ignore-state derivation (user list + music +
       // short checks). Don't also refresh it here — the two async writes
@@ -2577,6 +2645,7 @@
         if (cutKeys.includes(k)) cutChanged = true;
         if (k === "debug") syncDebugToPage();
       }
+      if ("volumeBoost" in changes || "volumeLevel" in changes) applyAudioChain();
       // speedOnly / autoIgnoreMusic / minCutMinutes change how a plan is
       // applied, not the analysis — re-derive from cache instead of clearing.
       if (

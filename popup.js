@@ -1,5 +1,7 @@
 const DEFAULTS = {
   cinemaMode: true,
+  volumeBoost: 100,
+  volumeLevel: false,
   showHistory: true,
   showWatchLater: true,
   showSubscriptions: true,
@@ -31,6 +33,7 @@ const VALUE_FIELDS = {
   speedRate: "number",
   aiModel: "string",
   minCutMinutes: "number",
+  volumeBoost: "number",
 };
 
 // Reset the per-video ignore + music/short override lists (stored locally).
