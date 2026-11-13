@@ -311,10 +311,17 @@ function buildPackage() {
     }
   }
 
+  const installGuideBuf = Buffer.from(buildInstallGuide(manifest.version), 'utf8');
+  const winUpdaterBuf = Buffer.from(buildWindowsUpdater(GITHUB_REPO), 'utf8');
+  const unixUpdaterBuf = Buffer.from(buildUnixUpdater(GITHUB_REPO), 'utf8');
+  fs.writeFileSync(path.join(outDir, 'HOW-TO-INSTALL.txt'), installGuideBuf);
+  fs.writeFileSync(path.join(outDir, 'Update-Windows.cmd'), winUpdaterBuf);
+  fs.writeFileSync(path.join(outDir, 'Update-Mac-Linux.command'), unixUpdaterBuf, { mode: 0o755 });
+
   zipEntries.push(
-    { name: 'HOW-TO-INSTALL.txt', data: Buffer.from(buildInstallGuide(manifest.version), 'utf8') },
-    { name: 'Update-Windows.cmd', data: Buffer.from(buildWindowsUpdater(GITHUB_REPO), 'utf8') },
-    { name: 'Update-Mac-Linux.command', data: Buffer.from(buildUnixUpdater(GITHUB_REPO), 'utf8'), executable: true }
+    { name: 'HOW-TO-INSTALL.txt', data: installGuideBuf },
+    { name: 'Update-Windows.cmd', data: winUpdaterBuf },
+    { name: 'Update-Mac-Linux.command', data: unixUpdaterBuf, executable: true }
   );
 
   let unpackedBytes = 0;

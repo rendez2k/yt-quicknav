@@ -226,7 +226,7 @@ void refreshTimeSaved();
 
 const UPDATE_STORAGE_KEY = "yqnUpdateStatusV1";
 const UPDATE_TTL_MS = 12 * 60 * 60 * 1000;
-const currentExtVersion = chrome.runtime?.getManifest?.()?.version || "1.44.0";
+const currentExtVersion = chrome.runtime?.getManifest?.()?.version || "1.44.1";
 const extVersionEl = document.getElementById("extVersion");
 if (extVersionEl) extVersionEl.textContent = `v${currentExtVersion}`;
 
@@ -313,6 +313,12 @@ checkUpdatesBtn?.addEventListener("click", async () => {
   }, 2200);
 });
 void checkExtensionUpdate({ force: false });
+
+document.getElementById("openExtensionsBtn")?.addEventListener("click", () => {
+  try {
+    chrome.tabs.create({ url: "chrome://extensions" });
+  } catch {}
+});
 
 document.getElementById("openShortcuts")?.addEventListener("click", () => {
   try {

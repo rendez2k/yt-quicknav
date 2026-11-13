@@ -1,5 +1,10 @@
 # YouTube Quick Nav + Cinema
 
+## Update banner Extensions shortcut & unpacked updater staging — 1.44.1 (13 November 2026)
+
+- **One-click Extensions shortcut:** Opens chrome://extensions right from the update banner so Reload takes a single click.
+- **Unpacked staging parity:** `npm run pack` now writes `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command` into `dist/unpacked/` alongside the release `.zip`.
+
 ## Long-video Highlight Reel scaling (`Skim / Balanced / Deep`) & GitHub Releases auto-update workflow — 1.44.0 (13 November 2026)
 
 - **Duration-Scaled Highlight Reel (`tldrReelBudget` + `Skim / Balanced / Deep`):** Eliminates fixed 5-clip / 28-second short-video caps on long talks, podcasts, and reviews — scaling clip budgets (`5` up to `26` clips, `25s–90s` per clip), adapting to wide YouTube heatmap buckets (`36s–72s` on 1–2 hour videos), guaranteeing major chapter/timeline-zone coverage on videos `>= 12 min`, pulling in 1–2 preceding setup sentences so punchlines never start mid-thought, coalescing nearby clips seamlessly, and adding an instant **`Skim · Balanced · Deep`** selector right inside the `⚡ TL;DR` card.
@@ -611,7 +616,7 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 
 ## Packaging for a friend (no keys shared)
 
-Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.44.0.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
+Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.44.1.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
 
 ## Development checks
 

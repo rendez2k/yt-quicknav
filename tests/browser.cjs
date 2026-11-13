@@ -99,7 +99,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         summary:'Fixture summary',takeaways:['Fixture takeaway'],mentions:[]
       })}]}});
     });
-    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,ghReleaseVersion='1.44.0';
+    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,ghReleaseVersion='1.44.1';
     await context.route('https://api.github.com/**', async route => {
       const headers={'access-control-allow-origin':'*','content-type':'application/json'};
       return route.fulfill({status:200,headers,json:{
@@ -1413,7 +1413,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       const popup=await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`);
       assert.equal(await popup.locator('details').count(),1,'Popup must maintain single <details> element');
-      assert.equal(await popup.locator('#extVersion').textContent(),'v1.44.0');
+      assert.equal(await popup.locator('#extVersion').textContent(),'v1.44.1');
       await popup.locator('#checkUpdatesBtn').click();
       await page.waitForTimeout(50);
       await popup.waitForFunction(()=>!document.querySelector('#updateBanner')?.hidden);
