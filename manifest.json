@@ -1,13 +1,52 @@
 {
   "manifest_version": 3,
   "name": "YouTube Quick Nav + Cinema",
-  "version": "1.31.0",
-  "description": "YouTube quick-access buttons, one-click Like/Watch Later, auto cinema mode, and Auto-Cut that skips sponsors/messaging and speeds through the dull parts.",
-  "permissions": ["storage"],
+  "version": "1.44.0",
+  "description": "YouTube quick-access buttons, one-click Like/Watch Later, auto cinema mode, TL;DR summary + highlight reel, and Auto-Cut that skips sponsors and dull parts.",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "commands": {
+    "toggle-autocut": {
+      "description": "Toggle Auto-Cut on the current video"
+    },
+    "toggle-tldr": {
+      "description": "Open TL;DR summary and highlight reel"
+    },
+    "search-transcript": {
+      "description": "Search captions in the current video"
+    },
+    "toggle-ab-loop": {
+      "description": "Set or clear A-B section loop"
+    },
+    "capture-frame": {
+      "description": "Capture clean full-resolution video frame"
+    },
+    "undo-last-skip": {
+      "description": "Watch last skipped section"
+    },
+    "prev-topic": {
+      "description": "Jump to start of current or previous topic"
+    },
+    "next-topic": {
+      "description": "Jump to next topic"
+    },
+    "jump-peak": {
+      "description": "Jump to next most-replayed peak"
+    },
+    "bookmark-note": {
+      "description": "Bookmark the current video timestamp in Notes"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://sponsor.ajay.app/*",
-    "https://api.anthropic.com/*"
+    "https://api.anthropic.com/*",
+    "https://api.typesafe.ai/*"
   ],
   "action": {
     "default_title": "YouTube Quick Nav + Cinema",
@@ -25,16 +64,43 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["injected.js"],
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "topics.js",
+        "injected.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["content.js"],
-      "css": ["content.css"],
-      "run_at": "document_idle"
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "preparation.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "plan-cache.js",
+        "topics.js",
+        "analysis-engine.js",
+        "cut-controls.js",
+        "video-tools-model.js",
+        "ai-client.js",
+        "video-tools.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_end"
     }
   ]
 }

@@ -1,0 +1,75 @@
+name: Verify & Publish Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax, lint & unit tests
+        run: |
+          npm run check
+          npm run lint
+          npm test
+
+      - name: Build key-free extension package (audits against hardcoded keys)
+        run: npm run pack
+
+      - name: Upload ZIP artifact on workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-quick-nav-zip
+          path: dist/youtube-quick-nav-v*.zip
+
+      - name: Publish GitHub Release when version is new
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          TAG="v${VERSION}"
+          ZIP="dist/youtube-quick-nav-v${VERSION}.zip"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping creation."
+            exit 0
+          fi
+
+          node -e "
+            const fs = require('fs');
+            const md = fs.readFileSync('README.md', 'utf8');
+            const m = md.match(/^## [^\r\n]+\r?\n+([\s\S]*?)(?=\r?\n## |\s*$)/m);
+            const notes = m ? m[0].trim() : 'Release v' + '$VERSION';
+            fs.writeFileSync('release-notes.md', notes + '\n\n---\nDownload **youtube-quick-nav-v$VERSION.zip**, unzip it (or run \`Update-Windows.cmd\` / \`Update-Mac-Linux.command\` in your existing folder), and click **Reload** in \`chrome://extensions\`.\n');
+          "
+
+          gh release create "$TAG" "$ZIP" \
+            --title "YouTube Quick Nav v${VERSION}" \
+            --notes-file release-notes.md

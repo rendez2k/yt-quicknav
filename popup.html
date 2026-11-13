@@ -3,14 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #0f0f0f;
+        --muted: #5f6368;
+        --border: #e5e7eb;
+        --input-border: #cbd5e1;
+        --surface: #f8fafc;
+        --surface-hover: #eef2f6;
+        --ok: #0a8f3c;
+        --err: #d93025;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #181818;
+          --fg: #f1f1f1;
+          --muted: #aaaaaa;
+          --border: #303030;
+          --input-border: #444444;
+          --surface: #242424;
+          --surface-hover: #323232;
+          --ok: #34d399;
+          --err: #f87171;
+        }
+      }
+      * { box-sizing: border-box; }
       body {
-        width: 240px;
+        width: 340px;
         margin: 0;
-        padding: 14px 16px;
-        font-family: "Roboto", "Segoe UI", Arial, sans-serif;
-        font-size: 14px;
-        color: #0f0f0f;
-        background: #fff;
+        padding: 14px 16px 18px;
+        font-family: "Roboto", "Segoe UI", system-ui, Arial, sans-serif;
+        font-size: 13.5px;
+        color: var(--fg);
+        background: var(--bg);
       }
       h1 {
         font-size: 15px;
@@ -23,32 +48,204 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 7px 0;
+        gap: 10px;
+        padding: 5px 0;
       }
-      .row label { cursor: pointer; }
-      hr { border: none; border-top: 1px solid #eee; margin: 8px 0; }
-      .hint { color: #666; font-size: 12px; margin-top: 10px; line-height: 1.4; }
-      input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
-      .section-title { font-weight: 600; margin: 6px 0 2px; }
-      .sub { padding-left: 14px; }
+      .row label { cursor: pointer; line-height: 1.3; }
+      hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+      .hint { color: var(--muted); font-size: 11.5px; margin: 6px 0 8px; line-height: 1.45; }
+      input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; accent-color: #3ea6ff; }
+      .section-title { font-weight: 600; font-size: 13px; margin: 6px 0 4px; color: var(--fg); }
+      .sub { padding-left: 12px; }
       input[type="text"], input[type="password"], input[type="number"] {
-        width: 120px; font-size: 12px; padding: 3px 5px;
-        border: 1px solid #ccc; border-radius: 5px;
+        width: 140px; font-size: 12px; padding: 4px 7px;
+        color: var(--fg); background: var(--surface);
+        border: 1px solid var(--input-border); border-radius: 6px;
       }
-      input[type="number"] { width: 48px; }
+      input[type="number"] { width: 64px; }
       button.mini {
-        font-size: 12px; padding: 3px 10px; cursor: pointer;
-        border: 1px solid #ccc; border-radius: 10px; background: #f7f7f7;
+        font-size: 12px; padding: 4px 11px; cursor: pointer;
+        color: var(--fg);
+        border: 1px solid var(--input-border); border-radius: 12px; background: var(--surface);
       }
-      button.mini:hover { background: #eee; }
+      button.mini:hover { background: var(--surface-hover); }
+      button.mini:disabled { opacity: 0.55; cursor: default; }
+      .keystatus {
+        flex: 1;
+        font-size: 11.5px;
+        color: var(--muted);
+        line-height: 1.3;
+        padding-right: 6px;
+      }
+      .keystatus.ok { color: var(--ok); }
+      .keystatus.err { color: var(--err); }
+      .row.keytest { padding-top: 0; }
       select {
-        max-width: 130px; font-size: 12px; padding: 3px 5px;
-        border: 1px solid #ccc; border-radius: 5px; background: #fff;
+        max-width: 170px; font-size: 12px; padding: 4px 6px;
+        color: var(--fg);
+        border: 1px solid var(--input-border); border-radius: 6px; background: var(--surface);
+      }
+      details summary {
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 13px;
+        padding: 4px 0;
+        user-select: none;
+      }
+      .savings-card {
+        margin: 0 0 12px;
+        padding: 9px 11px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+      }
+      .savings-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+        font-weight: 600;
+        font-size: 12.5px;
+      }
+      .savings-stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        text-align: center;
+      }
+      .savings-stat {
+        padding: 5px 4px;
+        border-radius: 7px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+      }
+      .savings-val {
+        display: block;
+        font-weight: 700;
+        font-size: 13.5px;
+        font-variant-numeric: tabular-nums;
+        color: var(--ok);
+      }
+      .savings-lbl {
+        display: block;
+        font-size: 10.5px;
+        color: var(--muted);
+        margin-top: 1px;
+      }
+      .savings-breakdown {
+        margin: 6px 0 0;
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.38;
+        font-variant-numeric: tabular-nums;
+      }
+      .header-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 0 0 12px;
+      }
+      .header-bar h1 {
+        margin: 0;
+      }
+      .ver-chip {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1px 6px;
+        font-variant-numeric: tabular-nums;
+      }
+      .update-card {
+        margin: 0 0 12px;
+        padding: 9px 11px;
+        border: 1px solid var(--ok);
+        border-radius: 10px;
+        background: var(--surface);
+      }
+      .update-title {
+        font-weight: 700;
+        font-size: 12.5px;
+        color: var(--ok);
+      }
+      .update-summary {
+        margin: 4px 0 7px;
+        font-size: 11.5px;
+        color: var(--fg);
+        line-height: 1.38;
+      }
+      .update-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      a.mini {
+        display: inline-block;
+        font-size: 12px;
+        padding: 4px 11px;
+        color: var(--fg);
+        text-decoration: none;
+        border: 1px solid var(--input-border);
+        border-radius: 12px;
+        background: var(--surface);
+      }
+      a.mini:hover { background: var(--surface-hover); }
+      a.mini.update-btn {
+        background: #0a8f3c;
+        border-color: transparent;
+        color: #ffffff;
+        font-weight: 600;
+      }
+      .update-hint {
+        margin: 6px 0 0;
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.38;
       }
     </style>
   </head>
   <body>
-    <h1>⚙️ Quick Nav + Cinema</h1>
+    <div class="header-bar">
+      <h1>⚙️ Quick Nav <span class="ver-chip" id="extVersion"></span></h1>
+      <button type="button" id="checkUpdatesBtn" class="mini" title="Check GitHub Releases for a newer version">Check updates</button>
+    </div>
+
+    <div class="update-card" id="updateBanner" hidden>
+      <div class="update-title" id="updateTitle"></div>
+      <p class="update-summary" id="updateSummary" hidden></p>
+      <div class="update-actions">
+        <a id="updateDownloadLink" class="mini update-btn" href="https://github.com/rendez2k/yt-quicknav/releases/latest" target="_blank" rel="noopener noreferrer">Download .zip</a>
+        <a id="updateNotesLink" class="mini" href="https://github.com/rendez2k/yt-quicknav/releases/latest" target="_blank" rel="noopener noreferrer">Release notes</a>
+      </div>
+      <p class="update-hint">Or run <b>Update-Windows.cmd</b> / <b>Update-Mac-Linux.command</b> in your extension folder, then click Reload in chrome://extensions.</p>
+    </div>
+
+    <div class="savings-card" id="savingsCard">
+      <div class="savings-head">
+        <span>⏱️ Time saved</span>
+        <button type="button" id="resetTimeSaved" class="mini">Reset</button>
+      </div>
+      <div class="savings-stats">
+        <div class="savings-stat">
+          <span class="savings-val" id="savedToday">0s</span>
+          <span class="savings-lbl">Today</span>
+        </div>
+        <div class="savings-stat">
+          <span class="savings-val" id="savedWeek">0s</span>
+          <span class="savings-lbl">7 days</span>
+        </div>
+        <div class="savings-stat">
+          <span class="savings-val" id="savedTotal">0s</span>
+          <span class="savings-lbl">All-time</span>
+        </div>
+      </div>
+      <p class="savings-breakdown" id="savedBreakdown">Watch videos with Auto-Cut or TL;DR to track time saved.</p>
+    </div>
 
     <div class="row">
       <label for="cinemaMode">🎬 Cinema mode</label>
@@ -68,6 +265,14 @@
     <div class="row">
       <label for="volumeLevel" title="Compressor that evens out quiet dialogue vs loud moments (VLC-style)">🎚️ Even out loudness</label>
       <input type="checkbox" id="volumeLevel" />
+    </div>
+    <div class="row">
+      <label for="cleanEndscreen" title="Hides blocking YouTube end-screen recommendation cards and corner watermarks (hold Alt to peek)">🧹 Hide blocking end-cards</label>
+      <input type="checkbox" id="cleanEndscreen" />
+    </div>
+    <div class="row">
+      <label for="redirectShorts" title="Automatically opens /shorts/ videos in the normal /watch player with timeline, Cinema mode, and Auto-Cut">🎬 Open Shorts in normal player</label>
+      <input type="checkbox" id="redirectShorts" />
     </div>
 
     <hr />
@@ -116,14 +321,73 @@
       <label for="showCut">✂️ Auto-Cut (button)</label>
       <input type="checkbox" id="showCut" />
     </div>
+    <div class="row">
+      <label for="showTldr">⚡ TL;DR (button)</label>
+      <input type="checkbox" id="showTldr" />
+    </div>
+    <div class="row">
+      <label for="showSpeed" title="Click to cycle 1×–2×, scroll wheel for ±0.1×, Shift+click to pin for channel">⏩ Speed (pill &amp; wheel)</label>
+      <input type="checkbox" id="showSpeed" />
+    </div>
+    <div class="row">
+      <label for="showLoop" title="Repeat any section A → B (Shift+L)">🔁 A–B Loop (button)</label>
+      <input type="checkbox" id="showLoop" />
+    </div>
+    <div class="row">
+      <label for="showScreenshot" title="Copy or save a full-resolution video frame without player overlays (Shift+S)">📸 Capture frame (button)</label>
+      <input type="checkbox" id="showScreenshot" />
+    </div>
+    <div class="row">
+      <label for="showVolume">🔊 Volume (button)</label>
+      <input type="checkbox" id="showVolume" />
+    </div>
+    <div class="row">
+      <label for="showTools">🧰 Video tools (button)</label>
+      <input type="checkbox" id="showTools" />
+    </div>
+    <div class="row">
+      <label for="showRealRemaining" title="Shows true wall-clock time left (accounting for playback speed and upcoming cuts) next to YouTube's player timer">⏳ Real time remaining (clock)</label>
+      <input type="checkbox" id="showRealRemaining" />
+    </div>
+    <div class="row">
+      <label for="showThumbBadges" title="Hover feed/search thumbnails to preview effective runtime after SponsorBlock or prepared cuts">🏷️ Thumbnail runtime badges</label>
+      <input type="checkbox" id="showThumbBadges" />
+    </div>
 
     <hr />
     <div class="section-title">✂️ Auto-Cut</div>
+    <div class="row">
+      <label for="cutPreset">Viewing preset</label>
+      <select id="cutPreset">
+        <option value="custom">Custom</option>
+        <option value="sponsors">Sponsors only</option>
+        <option value="gentle">Gentle trim</option>
+        <option value="quick">Quick watch</option>
+        <option value="tldr">TL;DR (highlights only)</option>
+      </select>
+    </div>
+    <div class="hint" id="presetHint"></div>
+    <div class="row">
+      <label for="thoroughAnalysis">Thorough analysis</label>
+      <input type="checkbox" id="thoroughAnalysis" />
+    </div>
+    <div class="hint">Uses enabled Claude analysis for two passes per section: pacing and content review, then sponsor and boundary checks. Quick watch / Plus also speeds through routine detail while keeping key explanations normal. Longer videos take more time and API usage. Replaces Jev fast verdicts. Unchecked sections stay unchanged; community sponsor cuts start immediately.</div>
+    <div class="row"><label for="watchLaterPrepare">Prepare Watch Later</label><input type="checkbox" id="watchLaterPrepare" /></div>
+    <div class="hint">Automatically prepares up to 5 videos every 30 minutes while Chrome is open and YouTube is signed in. Reuses one muted, paused tab in a separate minimised window, with your enabled providers and AI spending limits. Prepared results are reused when you watch.</div>
+    <p id="preparationStatus" class="hint" role="status"></p>
+    <button id="prepareNow" class="mini" type="button">Prepare now</button>
+    <button id="prepareStop" class="mini" type="button">Stop</button>
+    <div class="row">
+      <label for="learnCorrections">Learn from my cut corrections</label>
+      <input type="checkbox" id="learnCorrections" />
+    </div>
+    <div class="hint">Local channel suggestions after consistent corrections on at least 3 videos. Apply or reset them in the video's Auto-Cut panel. No learning history is sent to AI providers.</div>
 
     <div class="row">
       <label for="autoCut">Enable Auto-Cut</label>
       <input type="checkbox" id="autoCut" />
     </div>
+    <div class="row sub"><label for="reviewBeforeApply">Review cuts before applying</label><input type="checkbox" id="reviewBeforeApply" /></div>
     <div class="row sub">
       <label for="cutMessaging">Skip messaging (SponsorBlock)</label>
       <input type="checkbox" id="cutMessaging" />
@@ -137,8 +401,16 @@
       <input type="checkbox" id="autoCutPlus" />
     </div>
     <div class="row sub">
-      <label for="speedOnly" title="Sponsor segments are still cut outright">🐇 Speed only (sponsors still cut)</label>
+      <label for="cutSilence" title="Speeds through sustained speaker pauses and dead air in real time using live audio">🔇 Speed up dead air (live audio)</label>
+      <input type="checkbox" id="cutSilence" />
+    </div>
+    <div class="row sub">
+      <label for="speedOnly" title="Sponsors, self-promo and subscribe reminders are still cut outright">🐇 Speed only (sponsors still cut)</label>
       <input type="checkbox" id="speedOnly" />
+    </div>
+    <div class="row sub">
+      <label for="autoAdvancePlaylist" title="When watching a playlist or Watch Later, advance immediately when a cut skips to the end of the video">⏭️ Auto-advance playlist on outro skip</label>
+      <input type="checkbox" id="autoAdvancePlaylist" />
     </div>
     <div class="row sub">
       <label for="autoIgnoreMusic">🎵 Auto-ignore music videos</label>
@@ -156,12 +428,30 @@
       <label for="anthropicKey">Anthropic API key</label>
       <input type="password" id="anthropicKey" placeholder="sk-ant-…" />
     </div>
+    <div class="row sub keytest">
+      <span id="anthropicKeyStatus" class="keystatus"></span>
+      <button type="button" id="testAnthropicKey" class="mini">Test key</button>
+    </div>
     <div class="row sub">
       <label for="aiModel">AI model</label>
       <select id="aiModel">
-        <option value="claude-haiku-4-5-20251001">Haiku — fast, cheap</option>
-        <option value="claude-sonnet-5">Sonnet — smarter, ~3× cost</option>
+        <option value="claude-haiku-5-5">Haiku 5.5 — fast, cheap</option>
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+        <option value="claude-sonnet-5">Sonnet 5 — deeper analysis</option>
+        <option value="claude-sonnet-5-5">Sonnet 5.5 — fastest Sonnet</option>
       </select>
+    </div>
+    <div class="row sub">
+      <label for="jevCuts" title="TypeSafe's Jev model gives each ~45s section a fast keep/speed/skip verdict in one call — no waiting on a full AI analysis">⚡ Jev fast cuts (TypeSafe)</label>
+      <input type="checkbox" id="jevCuts" />
+    </div>
+    <div class="row sub">
+      <label for="typesafeKey">TypeSafe API key</label>
+      <input type="password" id="typesafeKey" placeholder="API key…" />
+    </div>
+    <div class="row sub keytest">
+      <span id="typesafeKeyStatus" class="keystatus"></span>
+      <button type="button" id="testTypesafeKey" class="mini">Test key</button>
     </div>
     <div class="row sub">
       <label for="speedRate">Speed-through rate</label>
@@ -178,15 +468,55 @@
       <input type="checkbox" id="debug" />
     </div>
 
+    <hr />
+    <div class="section-title">⌨️ Keyboard shortcuts</div>
+    <div class="row">
+      <label for="shortcutsEnabled">Enable watch-page hotkeys</label>
+      <input type="checkbox" id="shortcutsEnabled" />
+    </div>
+    <div class="hint">
+      On watch pages: <b>Shift+C</b> Auto-Cut · <b>Shift+T</b> TL;DR ·
+      <b>Shift+F</b> Search captions · <b>Shift+L</b> A–B Loop ·
+      <b>Shift+S</b> Capture frame · <b>Shift+Z</b> Watch last skip ·
+      <b>Shift+[</b> / <b>Shift+]</b> Prev/Next topic ·
+      <b>Shift+H</b> Peak · <b>Shift+B</b> Quick bookmark.
+    </div>
+    <button type="button" id="openShortcuts" class="mini">Customize Chrome shortcuts</button>
+
+    <hr />
+    <div class="section-title">💾 Backup &amp; restore</div>
+    <div class="hint">Export or restore settings, channel speeds/rules, learned corrections, per-video cuts and all saved notes. API keys are never included.</div>
+    <div class="row">
+      <button type="button" id="exportBackup" class="mini">Export backup (.json)</button>
+      <button type="button" id="importBackup" class="mini">Import backup (.json)</button>
+    </div>
+    <input type="file" id="importBackupFile" accept=".json,application/json" hidden />
+    <p id="backupStatus" class="hint" role="status"></p>
+
     <div class="hint">
       Auto-Cut skips sponsors/subscribe reminders and speeds through the dull
       parts. Toggle it per video with the ✂️ button, or leave "Enable Auto-Cut"
       on to apply automatically. SponsorBlock sends only a privacy-preserving
-      hash of the video ID. AI highlights use your own Anthropic key and send
-      the transcript to Claude. Changes apply on the next video / reload.
-      Tip: press <b>Shift+C</b> on a video to toggle Auto-Cut.
+      hash of the video ID when checking, or your marked range if you choose to submit. AI highlights use your own Anthropic key and send
+      the transcript to Claude. Jev fast cuts send the transcript to TypeSafe
+      AI for instant per-section keep/skip verdicts (no text generated).
+      Changes apply immediately. Red sections are skipped; amber sections play faster.
     </div>
 
+    <hr />
+    <details><summary>AI usage and budgets</summary>
+      <p class="hint">Estimated USD limits. 0 means unlimited. Each new paid request reserves an estimate first, including questions and key tests. Actual provider charges may differ. Prices checked 30 October 2026.</p>
+      <div class="row"><label for="aiDailyBudget">Daily limit ($)</label><input id="aiDailyBudget" type="number" min="0" max="1000" step="0.01" /></div>
+      <div class="row"><label for="aiVideoBudget">Per-video limit ($)</label><input id="aiVideoBudget" type="number" min="0" max="1000" step="0.01" /></div>
+      <p class="hint">Daily limit uses your computer’s local date. Per-video totals use retained history (90 days). Existing requests finish when a limit changes.</p>
+      <div class="row"><label for="jevInputPrice">Jev $ / million input tokens</label><input id="jevInputPrice" type="number" min="0" max="1000" step="0.001" /></div>
+      <p class="hint">Enter your TypeSafe input-token rate (output assumed free). 0 means unknown: Jev is blocked while a budget is enabled. Unpriced calls remain visible in usage.</p>
+      <p id="aiUsage" class="hint" role="status"></p><button id="refreshUsage" type="button" class="mini">Refresh usage</button>
+    </details>
+    <p class="hint">On a video, open <b>Video tools</b> to mark missed sponsors, ask questions, save notes or diagnose a missed skip.</p>
+    <script src="video-tools-model.js"></script>
+    <script src="ai-client.js"></script>
+    <script src="cut-controls.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

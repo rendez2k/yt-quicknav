@@ -6,7 +6,7 @@
 (() => {
   "use strict";
   if (window.__yqnInjected) return;
-  window.__yqnInjected = true;
+  Object.defineProperty(window, "__yqnInjected", { value: true, configurable: false });
 
   // Gated logging — content.js flips this via a 'set-debug' message.
   let YQN_DEBUG = false;
@@ -21,8 +21,49 @@
   // Timedtext (caption) traffic is captured the same way: the player's own
   // requests carry the pot (proof-of-origin) token that plain baseUrl
   // requests now lack — without it YouTube answers 200 with an empty body.
-  window.__yqnTx = null;
-  window.__yqnTt = null; // {videoId, segs} from the player's caption traffic
+  // Stored in private closure variables so untrusted page scripts cannot read
+  // or poison captured transcripts.
+  let capturedTx = null;
+  let capturedTt = null; // {videoId, segs} from the player's caption traffic
+  const ttWaiters = new Set();
+  let navigationGeneration = 0;
+  window.addEventListener("yt-navigate-start", () => {
+    navigationGeneration++;
+    capturedTx = null;
+    capturedTt = null;
+  });
+
+  function pushTranscriptCapture(videoId, segs) {
+    try {
+      window.postMessage(
+        { source: "yqn-injected", type: "transcript-capture", videoId, segments: segs },
+        window.location.origin
+      );
+    } catch {}
+  }
+
+  function parseTimedtextXml(xml) {
+    const out = [];
+    const re = /<text\b([^>]*)>([\s\S]*?)<\/text>/g;
+    let m;
+    while ((m = re.exec(xml))) {
+      const attrs = m[1];
+      const startMatch = attrs.match(/\bstart="([\d.]+)"/);
+      if (!startMatch) continue;
+      const durMatch = attrs.match(/\bdur="([\d.]+)"/);
+      const text = decodeEntities(m[2].replace(/<[^>]+>/g, ""))
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!text) continue;
+      const seg = { start: parseFloat(startMatch[1]) || 0, text };
+      if (durMatch) {
+        const dur = parseFloat(durMatch[1]);
+        if (Number.isFinite(dur) && dur > 0) seg.duration = dur;
+      }
+      out.push(seg);
+    }
+    return out;
+  }
 
   function captureTimedtext(url, body) {
     try {
@@ -36,21 +77,18 @@
           .filter((ev) => ev.segs)
           .map((ev) => ({
             start: (ev.tStartMs || 0) / 1000,
+            duration: (ev.dDurationMs || 0) / 1000,
             text: ev.segs.map((s) => s.utf8 || "").join("").replace(/\s+/g, " ").trim(),
           }))
           .filter((x) => x.text);
       } else if (body.indexOf("<text") !== -1) {
-        const re = /<text[^>]*\bstart="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
-        let m;
-        while ((m = re.exec(body))) {
-          const text = decodeEntities(m[2].replace(/<[^>]+>/g, ""))
-            .replace(/\s+/g, " ")
-            .trim();
-          if (text) segs.push({ start: parseFloat(m[1]) || 0, text });
-        }
+        segs = parseTimedtextXml(body);
       }
       if (segs.length) {
-        window.__yqnTt = { videoId: vid, segs };
+        capturedTt = { videoId: vid, segs };
+        for (const fn of [...ttWaiters]) {
+          try { fn(vid, segs); } catch {}
+        }
         dlog("[YQN] captured timedtext:", segs.length, "lines for", vid);
       }
     } catch {}
@@ -60,15 +98,23 @@
     const of = window.fetch;
     if (!of) return;
     window.fetch = function (...a) {
+      const generation = navigationGeneration;
+      const videoId = new URLSearchParams(location.search).get("v");
       const p = of.apply(this, a);
       try {
-        const url = typeof a[0] === "string" ? a[0] : (a[0] && a[0].url) || "";
+        const url =
+          typeof a[0] === "string"
+            ? a[0]
+            : a[0] instanceof URL
+              ? a[0].href
+              : (a[0] && a[0].url) || "";
         if (url.indexOf("/youtubei/v1/get_transcript") !== -1) {
           p.then((r) => r.clone().json())
             .then((j) => {
               const segs = parseTranscriptResponse(j);
-              if (segs.length) {
-                window.__yqnTx = segs;
+              if (segs.length && generation === navigationGeneration) {
+                capturedTx = { videoId, segs };
+                pushTranscriptCapture(videoId, segs);
                 dlog("[YQN] captured transcript:", segs.length, "segments");
               }
             })
@@ -89,14 +135,15 @@
     if (!XHR) return;
     const open = XHR.prototype.open;
     XHR.prototype.open = function (method, url) {
-      this.__yqnIsTx =
-        typeof url === "string" && url.indexOf("/youtubei/v1/get_transcript") !== -1;
-      this.__yqnTtUrl =
-        typeof url === "string" && url.indexOf("/api/timedtext") !== -1 ? url : null;
+      const u = typeof url === "string" ? url : url instanceof URL ? url.href : "";
+      this.__yqnIsTx = u.indexOf("/youtubei/v1/get_transcript") !== -1;
+      this.__yqnTtUrl = u.indexOf("/api/timedtext") !== -1 ? u : null;
       return open.apply(this, arguments);
     };
     const send = XHR.prototype.send;
     XHR.prototype.send = function () {
+      const generation = navigationGeneration;
+      const videoId = new URLSearchParams(location.search).get("v");
       if (this.__yqnTtUrl) {
         this.addEventListener("load", () => {
           try {
@@ -109,8 +156,9 @@
           try {
             const j = JSON.parse(this.responseText);
             const segs = parseTranscriptResponse(j);
-            if (segs.length) {
-              window.__yqnTx = segs;
+            if (segs.length && generation === navigationGeneration) {
+              capturedTx = { videoId, segs };
+              pushTranscriptCapture(videoId, segs);
               dlog("[YQN] captured transcript (xhr):", segs.length, "segments");
             }
           } catch {}
@@ -122,17 +170,25 @@
 
   // Find the getTranscriptEndpoint params anywhere in a response tree.
   function findTranscriptParams(obj) {
+    if (!obj || typeof obj !== "object") return null;
+    if (obj.getTranscriptEndpoint?.params) return obj.getTranscriptEndpoint.params;
     let p = null;
-    (function walk(o) {
+    function walk(o) {
       if (p || !o || typeof o !== "object") return;
       if (o.getTranscriptEndpoint && o.getTranscriptEndpoint.params) {
         p = o.getTranscriptEndpoint.params;
         return;
       }
-      for (const k in o) {
-        if (!p) walk(o[k]);
+      const keys = Object.keys(o);
+      for (let i = 0; i < keys.length; i++) {
+        if (p) return;
+        walk(o[keys[i]]);
       }
-    })(obj);
+    }
+    // Engagement panels hold the transcript endpoint on watch responses; check
+    // them first before traversing large sidebar/comment trees.
+    if (obj.engagementPanels) walk(obj.engagementPanels);
+    if (!p) walk(obj);
     return p;
   }
 
@@ -148,7 +204,8 @@
         .join("")
         .replace(/\s+/g, " ")
         .trim();
-      if (text) out.push({ start: (+r.startMs || 0) / 1000, text });
+      if (text) out.push({ start: (+r.startMs || 0) / 1000,
+        end: (+r.endMs || 0) / 1000, duration: (+r.durationMs || 0) / 1000, text });
     }
     return out;
   }
@@ -201,12 +258,21 @@
   }
 
   function innertubeFetch(path, apiKey, auth, body) {
+    const sessionIndex = getCfg("SESSION_INDEX");
+    const authUser =
+      sessionIndex !== null && sessionIndex !== undefined && String(sessionIndex) !== ""
+        ? String(sessionIndex)
+        : "0";
     const headers = {
       "Content-Type": "application/json",
       "X-Origin": ORIGIN,
-      "X-Goog-AuthUser": "0",
+      "X-Goog-AuthUser": authUser,
     };
-    if (auth) headers.Authorization = auth; // optional for read endpoints
+    if (auth) {
+      headers.Authorization = auth; // optional for read endpoints
+      const pageId = getCfg("DELEGATED_SESSION_ID");
+      if (typeof pageId === "string" && pageId) headers["X-Goog-PageId"] = pageId;
+    }
     return fetch(
       `${ORIGIN}/youtubei/v1/${path}?key=${encodeURIComponent(apiKey)}&prettyPrint=false`,
       {
@@ -220,6 +286,7 @@
 
   // Find the first array stored under `key` anywhere in an object tree.
   function deepFindArray(obj, key) {
+    if (!obj || typeof obj !== "object") return null;
     let res = null;
     (function walk(o) {
       if (res || !o || typeof o !== "object") return;
@@ -227,11 +294,22 @@
         res = o[key];
         return;
       }
-      for (const k in o) {
-        if (!res) walk(o[k]);
+      const keys = Object.keys(o);
+      for (let i = 0; i < keys.length; i++) {
+        if (res) return;
+        walk(o[keys[i]]);
       }
     })(obj);
     return res;
+  }
+
+  function findHeatMarkers(obj) {
+    if (!obj || typeof obj !== "object") return null;
+    return (
+      deepFindArray(obj.frameworkUpdates, "heatMarkers") ||
+      deepFindArray(obj.playerOverlays, "heatMarkers") ||
+      deepFindArray(obj, "heatMarkers")
+    );
   }
 
   function mapHeatMarkers(markers) {
@@ -270,15 +348,7 @@
       const r = await fetch(clean, { credentials: "omit" });
       diag.ttXmlStatus = r.status;
       const xml = await r.text();
-      const out = [];
-      const re = /<text[^>]*\bstart="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
-      let m;
-      while ((m = re.exec(xml))) {
-        const text = decodeEntities(m[2].replace(/<[^>]+>/g, ""))
-          .replace(/\s+/g, " ")
-          .trim();
-        if (text) out.push({ start: parseFloat(m[1]) || 0, text });
-      }
+      const out = parseTimedtextXml(xml);
       diag.xmlNodes = out.length;
       if (out.length) return out;
     } catch (e) {
@@ -295,6 +365,7 @@
         .filter((ev) => ev.segs)
         .map((ev) => ({
           start: (ev.tStartMs || 0) / 1000,
+          duration: (ev.dDurationMs || 0) / 1000,
           text: ev.segs.map((s) => s.utf8 || "").join("").replace(/\s+/g, " ").trim(),
         }))
         .filter((x) => x.text);
@@ -309,6 +380,10 @@
   // Captions may flash on for under a second — a fair trade against wrongly
   // reporting "no captions" on a video that has 21 caption tracks.
   async function nudgePlayerCaptions(videoId, track, diag) {
+    const generation = navigationGeneration;
+    const current = () => generation === navigationGeneration &&
+      new URLSearchParams(location.search).get("v") === videoId;
+    if (!current() || !getLivePlayerResponse(videoId)) return null;
     const p = getMoviePlayer();
     if (!p || typeof p.loadModule !== "function" || typeof p.setOption !== "function") {
       return null;
@@ -325,18 +400,37 @@
       diag.nudgeErr = e && e.message;
       return null;
     }
-    let got = null;
-    const t0 = Date.now();
-    while (Date.now() - t0 < 3500) {
-      const tt = window.__yqnTt;
+    const got = await new Promise((resolve) => {
+      let done = false;
+      let timer = null;
+      let poll = null;
+      const finish = (segs) => {
+        if (done) return;
+        done = true;
+        ttWaiters.delete(onCapture);
+        clearTimeout(timer);
+        clearInterval(poll);
+        resolve(segs || null);
+      };
+      const onCapture = (vid, segs) => {
+        if (!current()) return finish(null);
+        if (vid === videoId && segs && segs.length) finish(segs);
+      };
+      const tt = capturedTt;
       if (tt && tt.videoId === videoId && tt.segs && tt.segs.length) {
-        got = tt.segs;
-        break;
+        resolve(tt.segs);
+        return;
       }
-      await new Promise((r) => setTimeout(r, 150));
-    }
+      ttWaiters.add(onCapture);
+      poll = setInterval(() => {
+        if (!current()) return finish(null);
+        const cur = capturedTt;
+        if (cur && cur.videoId === videoId && cur.segs && cur.segs.length) finish(cur.segs);
+      }, 60);
+      timer = setTimeout(() => finish(null), 3500);
+    });
     try {
-      if (!wasOn) {
+      if (!wasOn && current()) {
         p.setOption("captions", "track", {});
         p.unloadModule("captions");
       }
@@ -356,12 +450,39 @@
   function getLivePlayerResponse(videoId) {
     try {
       const mp = getMoviePlayer();
-      if (!mp) return null;
-      const pr = mp.getPlayerResponse();
-      const id = pr && pr.videoDetails && pr.videoDetails.videoId;
-      if (!id || id === videoId) return pr;
+      if (mp) {
+        const pr = mp.getPlayerResponse();
+        if (pr && pr.videoDetails && pr.videoDetails.videoId === videoId) return pr;
+      }
+      const flexy = document.querySelector("ytd-watch-flexy");
+      for (const cand of [flexy?.playerData, flexy?.__data?.playerData]) {
+        if (cand?.videoDetails?.videoId === videoId) return cand;
+      }
     } catch {}
     return null;
+  }
+
+  // Current watch-next response (`ytd-watch-flexy.data` on SPA navigations, or
+  // `ytInitialData` on fresh document loads), verified against `videoId`.
+  function getLiveWatchData(videoId) {
+    try {
+      const flexy = document.querySelector("ytd-watch-flexy");
+      for (const cand of [flexy?.data, flexy?.watchNextData, flexy?.__data?.data]) {
+        if (cand?.currentVideoEndpoint?.watchEndpoint?.videoId === videoId) return cand;
+      }
+    } catch {}
+    const pr = window.ytInitialPlayerResponse;
+    if (pr?.videoDetails?.videoId === videoId && window.ytInitialData) {
+      return window.ytInitialData;
+    }
+    return null;
+  }
+
+  function videoChapters(videoId, response) {
+    const duration=Number(response?.videoDetails?.lengthSeconds) || 0;
+    const watchData=getLiveWatchData(videoId);
+    const native=watchData ? YqnTopics.fromPlayerData(watchData,duration) : [];
+    return native.length ? native : YqnTopics.fromDescription(response?.videoDetails?.shortDescription,duration);
   }
 
   // Gather Auto-Cut data (most-replayed heatmap + transcript) for a video.
@@ -369,147 +490,178 @@
   async function gatherAutocut(videoId, needHeatmap, needTranscript) {
     const payload = { heatmap: [], transcript: [] };
     const diag = { videoId };
+    const generation = navigationGeneration;
+    const current = () => generation === navigationGeneration &&
+      new URLSearchParams(location.search).get("v") === videoId;
+    if (!current()) return payload;
 
     const pr = window.ytInitialPlayerResponse;
     const freshGlobals = !!(pr && pr.videoDetails && pr.videoDetails.videoId === videoId);
     diag.freshGlobals = freshGlobals;
 
     const livePr = getLivePlayerResponse(videoId);
+    const liveWatch = getLiveWatchData(videoId);
+    const prAny = livePr || (freshGlobals ? pr : null);
+    payload.duration = Number(prAny?.videoDetails?.lengthSeconds) || 0;
+    payload.chapters = videoChapters(videoId, prAny);
     diag.livePlayer = !!livePr;
 
     const apiKey = getCfg("INNERTUBE_API_KEY");
     const context = getCfg("INNERTUBE_CONTEXT");
-    const auth = await buildAuthHeader(ORIGIN).catch(() => null);
+    let authPromise = null;
+    const getAuth = () => (authPromise ||= buildAuthHeader(ORIGIN).catch(() => null));
 
-    // Fetch the `next` response once and reuse it (heatmap + transcript params).
-    let nextJson;
-    async function getNext() {
-      if (nextJson !== undefined) return nextJson;
-      nextJson = null;
-      if (apiKey && context) {
+    // Fetch the `next` response at most once and share its in-flight promise
+    // across concurrent heatmap + transcript lookups.
+    let nextPromise = null;
+    function getNext() {
+      if (nextPromise) return nextPromise;
+      nextPromise = (async () => {
+        if (!apiKey || !context || !current()) return null;
         try {
+          const auth = await getAuth();
+          if (!current()) return null;
           const res = await innertubeFetch("next", apiKey, auth, { context, videoId });
-          nextJson = await res.json().catch(() => ({}));
+          const nextJson = await res.json().catch(() => ({}));
+          if (current() && !payload.chapters.length) {
+            payload.chapters = YqnTopics.fromPlayerData(nextJson, payload.duration);
+          }
           diag.nextKeys = Object.keys(nextJson || {});
           if (nextJson && nextJson.error) diag.nextError = nextJson.error.status;
+          return nextJson;
         } catch (e) {
           diag.nextErr = e && e.message;
+          return null;
         }
-      }
-      return nextJson;
+      })();
+      return nextPromise;
     }
 
-    if (needHeatmap) {
-      let markers = null;
-      let src = "none";
-      if (freshGlobals && window.ytInitialData) {
-        markers = deepFindArray(window.ytInitialData, "heatMarkers");
-        if (markers) src = "ytInitialData";
-      }
-      if (!markers) {
-        const nj = await getNext();
-        markers = nj && deepFindArray(nj, "heatMarkers");
-        if (markers) src = "next-api";
-      }
-      if (markers) payload.heatmap = mapHeatMarkers(markers);
-      diag.heatmapSrc = src;
-      dlog("[YQN] autocut heatmap points:", payload.heatmap.length, diag);
-    }
+    const heatmapTask = needHeatmap
+      ? (async () => {
+          let markers = null;
+          let src = "none";
+          if (liveWatch) {
+            markers = findHeatMarkers(liveWatch);
+            if (markers) src = freshGlobals ? "ytInitialData" : "watchFlexy";
+          }
+          if (!markers) {
+            const nj = await getNext();
+            if (!current()) return;
+            markers = nj && findHeatMarkers(nj);
+            if (markers) src = "next-api";
+          }
+          if (markers) payload.heatmap = mapHeatMarkers(markers);
+          diag.heatmapSrc = src;
+          dlog("[YQN] autocut heatmap points:", payload.heatmap.length, diag);
+        })()
+      : null;
 
-    if (needTranscript) {
-      let tsrc = "none";
+    const transcriptTask = needTranscript
+      ? (async () => {
+          let tsrc = "none";
 
-      // Video description — often carries the real URLs for things the
-      // speaker mentions, so the AI can link mentions accurately.
-      const prAny = livePr || (freshGlobals ? pr : null);
-      payload.description =
-        (prAny && prAny.videoDetails && prAny.videoDetails.shortDescription) || "";
+          // Video description — often carries the real URLs for things the
+          // speaker mentions, so the AI can link mentions accurately.
+          payload.description =
+            (prAny && prAny.videoDetails && prAny.videoDetails.shortDescription) || "";
+          payload.title = prAny?.videoDetails?.title || "";
 
-      // 1) get_transcript endpoint — the same API the transcript panel uses,
-      //    so it works where the timedtext download is token-gated. Params
-      //    come free from ytInitialData on a fresh load, else from `next`.
-      if (apiKey && context) {
-        let params =
-          freshGlobals && window.ytInitialData
-            ? findTranscriptParams(window.ytInitialData)
-            : null;
-        diag.paramsFromInitial = !!params;
-        if (!params) {
-          const nj = await getNext();
-          params = findTranscriptParams(nj);
-        }
-        diag.transcriptParams = !!params;
-        if (params) {
-          try {
-            const res = await innertubeFetch("get_transcript", apiKey, auth, {
-              context,
-              params,
-            });
-            const gj = await res.json().catch(() => ({}));
-            const segs = parseTranscriptResponse(gj);
-            diag.getTranscript = segs.length;
-            if (segs.length) {
-              payload.transcript = segs;
-              tsrc = "get_transcript";
+          // 1) get_transcript endpoint — the same API the transcript panel uses,
+          //    so it works where the timedtext download is token-gated. Params
+          //    come free from live watch data or ytInitialData, else from `next`.
+          if (apiKey && context) {
+            let params = liveWatch ? findTranscriptParams(liveWatch) : null;
+            diag.paramsFromInitial = !!params;
+            if (!params) {
+              const nj = await getNext();
+              if (!current()) return;
+              params = findTranscriptParams(nj);
             }
-          } catch (e) {
-            diag.getTranscriptErr = e && e.message;
+            diag.transcriptParams = !!params;
+            if (params) {
+              try {
+                const auth = await getAuth();
+                if (!current()) return;
+                const res = await innertubeFetch("get_transcript", apiKey, auth, {
+                  context,
+                  params,
+                });
+                const gj = await res.json().catch(() => ({}));
+                if (!current()) return;
+                const segs = parseTranscriptResponse(gj);
+                diag.getTranscript = segs.length;
+                if (segs.length) {
+                  payload.transcript = segs;
+                  tsrc = "get_transcript";
+                }
+              } catch (e) {
+                diag.getTranscriptErr = e && e.message;
+              }
+            }
           }
-        }
-      }
 
-      // 2) captions the player already downloaded for its own display —
-      //    those requests carried a valid pot token, so they work even when
-      //    the direct download below is token-gated.
-      if (!payload.transcript.length) {
-        const tt = window.__yqnTt;
-        if (tt && tt.videoId === videoId && tt.segs && tt.segs.length) {
-          payload.transcript = tt.segs;
-          tsrc = "player-captions";
-          diag.ttCaptured = tt.segs.length;
-        }
-      }
-
-      // 3) caption track download (often token-gated now — empty 200s)
-      if (!payload.transcript.length) {
-        let tracks =
-          (livePr && deepFindArray(livePr, "captionTracks")) ||
-          (freshGlobals && deepFindArray(pr, "captionTracks"));
-        if (!tracks && apiKey && context) {
-          try {
-            const res = await innertubeFetch("player", apiKey, auth, { context, videoId });
-            const json = await res.json().catch(() => ({}));
-            if (json && json.playabilityStatus) diag.playability = json.playabilityStatus.status;
-            tracks = deepFindArray(json, "captionTracks");
-          } catch (e) {
-            diag.playerErr = e && e.message;
-          }
-        }
-        diag.captionTracks = tracks ? tracks.length : 0;
-        if (tracks && tracks.length) {
-          const track =
-            tracks.find((t) => (t.languageCode || "").startsWith("en")) || tracks[0];
-          payload.transcript = await fetchTranscript(track.baseUrl, diag);
-          if (payload.transcript.length) tsrc = "captions";
-
-          // 4) last resort: ask the player itself to load the caption track.
-          //    Its request carries a valid pot token and the interceptor
-          //    above captures the response; the module is unloaded straight
-          //    after so nothing visibly changes for long.
+          // 2) captions the player already downloaded for its own display —
+          //    those requests carried a valid pot token, so they work even when
+          //    the direct download below is token-gated.
           if (!payload.transcript.length) {
-            const got = await nudgePlayerCaptions(videoId, track, diag);
-            if (got) {
-              payload.transcript = got;
-              tsrc = "player-nudge";
+            if (!current()) return;
+            const tt = capturedTt;
+            if (tt && tt.videoId === videoId && tt.segs && tt.segs.length) {
+              payload.transcript = tt.segs;
+              tsrc = "player-captions";
+              diag.ttCaptured = tt.segs.length;
             }
           }
-        }
-      }
 
-      diag.captionSrc = tsrc;
-      dlog("[YQN] autocut transcript lines:", payload.transcript.length, diag);
-    }
+          // 3) caption track download (often token-gated now — empty 200s)
+          if (!payload.transcript.length) {
+            if (!current()) return;
+            let tracks =
+              (livePr && deepFindArray(livePr, "captionTracks")) ||
+              (freshGlobals && deepFindArray(pr, "captionTracks"));
+            if (!tracks && apiKey && context) {
+              try {
+                const auth = await getAuth();
+                if (!current()) return;
+                const res = await innertubeFetch("player", apiKey, auth, { context, videoId });
+                const json = await res.json().catch(() => ({}));
+                if (!current()) return;
+                if (json && json.playabilityStatus) diag.playability = json.playabilityStatus.status;
+                tracks = deepFindArray(json, "captionTracks");
+              } catch (e) {
+                diag.playerErr = e && e.message;
+              }
+            }
+            diag.captionTracks = tracks ? tracks.length : 0;
+            if (tracks && tracks.length) {
+              const track =
+                tracks.find((t) => (t.languageCode || "").startsWith("en")) || tracks[0];
+              payload.transcript = await fetchTranscript(track.baseUrl, diag);
+              if (!current()) return;
+              if (payload.transcript.length) tsrc = "captions";
 
+              // 4) last resort: ask the player itself to load the caption track.
+              //    Its request carries a valid pot token and the interceptor
+              //    above captures the response; the module is unloaded straight
+              //    after so nothing visibly changes for long.
+              if (!payload.transcript.length) {
+                const got = await nudgePlayerCaptions(videoId, track, diag);
+                if (got) {
+                  payload.transcript = got;
+                  tsrc = "player-nudge";
+                }
+              }
+            }
+          }
+
+          diag.captionSrc = tsrc;
+          dlog("[YQN] autocut transcript lines:", payload.transcript.length, diag);
+        })()
+      : null;
+
+    await Promise.all([heatmapTask, transcriptTask].filter(Boolean));
+    if (!current()) return payload;
     payload.diag = diag;
     return payload;
   }
@@ -539,7 +691,7 @@
         return { ok: false, message: "YouTube rejected the change." };
       }
       return { ok: true };
-    } catch (err) {
+    } catch {
       return { ok: false, message: "Network error talking to YouTube." };
     }
   }
@@ -615,11 +767,12 @@
         return { ok: false, message: opt ? "WL field not recognised" : "WL row not found" };
       }
       return { ok: true, inWL };
-    } catch (err) {
+    } catch {
       return { ok: false, message: "network error" };
     }
   }
 
+  const dataRequests = new Map();
   window.addEventListener("message", async (event) => {
     if (event.source !== window) return;
     const data = event.data;
@@ -631,7 +784,7 @@
     }
 
     if (data.type === "transcript-reset") {
-      window.__yqnTx = null;
+      capturedTx = null;
       return;
     }
 
@@ -640,7 +793,8 @@
         {
           source: "yqn-injected",
           type: "transcript-capture",
-          segments: window.__yqnTx || [],
+          videoId: data.videoId,
+          segments: capturedTx?.videoId === data.videoId ? capturedTx.segs : [],
         },
         window.location.origin
       );
@@ -652,6 +806,11 @@
     if (data.type === "video-category") {
       let category = null;
       let title = null;
+      let duration = 0;
+      let channelId = "";
+      let channelName = "";
+      let isLive = false;
+      let chapters=[];
       try {
         const initial = window.ytInitialPlayerResponse;
         const pr =
@@ -668,14 +827,26 @@
             pr.microformat.playerMicroformatRenderer.category) ||
           null;
         title = (pr && pr.videoDetails && pr.videoDetails.title) || null;
+        duration = Number(pr?.videoDetails?.lengthSeconds) || 0;
+        channelId = typeof pr?.videoDetails?.channelId === "string" ? pr.videoDetails.channelId : "";
+        channelName = typeof pr?.videoDetails?.author === "string" ? pr.videoDetails.author : "";
+        const liveNow = pr?.microformat?.playerMicroformatRenderer?.liveBroadcastDetails?.isLiveNow;
+        isLive = !!(pr?.videoDetails?.isLive || pr?.videoDetails?.isUpcoming || liveNow);
+        if(pr)chapters=videoChapters(data.videoId,pr);
       } catch {}
       window.postMessage(
         {
           source: "yqn-injected",
           type: "video-category",
           videoId: data.videoId,
+          requestId: data.requestId,
           category,
           title,
+          duration,
+          channelId,
+          channelName,
+          isLive,
+          chapters,
         },
         window.location.origin
       );
@@ -683,16 +854,21 @@
     }
 
     if (data.type === "autocut-data") {
-      const payload = await gatherAutocut(
-        data.videoId,
-        !!data.needHeatmap,
-        !!data.needTranscript
-      );
+      if (!data.requestId || dataRequests.has(data.requestId)) return;
+      dataRequests.set(data.requestId, true);
+      setTimeout(() => dataRequests.delete(data.requestId), 30000);
+      let payload;
+      try {
+        payload = await gatherAutocut(data.videoId, !!data.needHeatmap, !!data.needTranscript);
+      } catch {
+        payload = {error: "YouTube data could not be read"};
+      }
       window.postMessage(
         {
           source: "yqn-injected",
           type: "autocut-data",
           videoId: data.videoId,
+          requestId: data.requestId,
           payload,
         },
         window.location.origin

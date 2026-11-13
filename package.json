@@ -1,0 +1,17 @@
+{
+  "name": "youtube-quick-nav",
+  "version": "1.44.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node --test --test-concurrency=1 tests/browser.cjs tests/preparation-browser.cjs",
+    "check": "node --check topics.js && node --check analysis-engine.js && node --check cut-controls.js && node --check content.js && node --check injected.js && node --check background.js && node --check popup.js && node --check video-tools-model.js && node --check ai-client.js && node --check video-tools.js && node --check usage-ledger.js && node --check plan-cache.js && node --check prepare-worker.js && node --check preparation.js",
+    "lint": "eslint analysis-engine.js cut-controls.js content.js injected.js background.js popup.js video-tools-model.js ai-client.js video-tools.js usage-ledger.js topics.js plan-cache.js prepare-worker.js preparation.js",
+    "pack": "node scripts/pack.cjs"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
+    "playwright": "^1.62.1"
+  }
+}
