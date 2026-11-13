@@ -1,5 +1,9 @@
 # YouTube Quick Nav + Cinema
 
+## Single-row compact toolbar (`[📜 🕒 📺 ❤️ 📚]` icon strip & `[⏮ Topics ⏭]` stepper) — 1.45.1 (13 November 2026)
+
+- **Compact single-row toolbar layout:** Slims chip padding/height, groups the 5 YouTube page links into a 1-click `[📜 🕒 📺 ❤️ 📚]` icon capsule with hover tooltips, unifies `[⏮ | Topics · N | ⏭]` into a single stepper pill, and tightens verbose action labels (`🔊 150%+`, `🔗 Link`, `🧰 Tools`, `➕ Save` / `✓ Saved`) so all 19 controls fit cleanly on one row.
+
 ## Instant prepared Watch Later badges (`⚡ → mm:ss`), larger preparation batches & distinct nav vs. action buttons — 1.45.0 (13 November 2026)
 
 - **Instant prepared thumbnail badges (no hover needed):** Prepared videos in Watch Later, playlists, feeds, and sidebars now light up automatically on page load and live as background preparation completes (zero extra network requests).
@@ -623,7 +627,7 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 
 ## Packaging for a friend (no keys shared)
 
-Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.45.0.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
+Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.45.1.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
 
 ## Development checks
 

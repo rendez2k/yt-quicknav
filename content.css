@@ -1,29 +1,29 @@
 #yqn-quick-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0 4px;
+  gap: 5px;
+  margin: 8px 0 2px;
   align-items: center;
 }
 
 #yqn-quick-bar .yqn-pill-compact {
-  padding-left: 10px !important;
-  padding-right: 10px !important;
+  padding-left: 7px !important;
+  padding-right: 7px !important;
 }
 
 #yqn-quick-bar .yqn-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
+  gap: 4px;
+  padding: 3px 8.5px;
   font-family: "Roboto", "Arial", sans-serif;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 20px;
+  line-height: 18px;
   color: var(--yt-spec-text-primary, #0f0f0f);
   background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05));
   border: none;
-  border-radius: 18px;
+  border-radius: 13px;
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
@@ -35,16 +35,68 @@
 }
 
 #yqn-quick-bar .yqn-ico {
-  font-size: 15px;
+  font-size: 13px;
   line-height: 1;
 }
 
-/* Spacer + faint divider between the link pills and the action toggles. */
+/* Compact 1-click icon strip for YouTube navigation links. */
+#yqn-quick-bar .yqn-link-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 13px;
+  background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05));
+  box-shadow: inset 0 0 0 1px var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.12));
+}
+
+#yqn-quick-bar .yqn-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--yt-spec-text-primary, #0f0f0f);
+  transition: background 0.15s ease;
+}
+
+#yqn-quick-bar .yqn-link-icon:hover {
+  background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.14));
+}
+
+/* Unified segmented capsule for [ ⏮ | Topics · N | ⏭ ]. */
+#yqn-quick-bar .yqn-topic-group {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 13px;
+  overflow: hidden;
+  background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.06));
+  box-shadow: inset 0 0 0 1px var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.14));
+}
+
+#yqn-quick-bar .yqn-topic-group .yqn-pill {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+#yqn-quick-bar .yqn-topic-group .yqn-pill:hover {
+  background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.12));
+}
+
+#yqn-quick-bar .yqn-topic-group #yqn-topics-btn {
+  border-left: 1px solid var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.12));
+  border-right: 1px solid var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.12));
+}
+
+/* Spacer + faint divider between the link strip and the action toggles. */
 #yqn-quick-bar .yqn-sep {
   width: 1px;
-  align-self: stretch;
-  margin: 2px 8px;
-  background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.1));
+  height: 16px;
+  margin: 0 2px;
+  background: var(--yt-spec-10-percent-layer, rgba(0, 0, 0, 0.14));
 }
 
 /* Stateless action buttons use YouTube's neutral surface; stateful toggles use red/green. */
@@ -302,9 +354,9 @@
 #yqn-quick-bar #yqn-vol-controls {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
-  border-radius: 18px;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 13px;
   background: var(--yt-spec-badge-chip-background, rgba(0, 0, 0, 0.05));
 }
 
@@ -337,8 +389,8 @@
   gap: 6px 12px;
   align-items: center;
   color: var(--yt-spec-text-primary, #0f0f0f);
-  font-size: 12px;
-  padding: 5px 0;
+  font-size: 11.5px;
+  padding: 2px 0;
 }
 #yqn-playback-status[hidden], #yqn-playback-status button[hidden] { display: none; }
 .yqn-live-state { font-weight: 600; }

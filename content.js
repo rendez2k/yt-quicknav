@@ -993,16 +993,23 @@
     bar.id = BAR_ID;
 
     let hasLinks = false;
+    const linkStrip = document.createElement("div");
+    linkStrip.className = "yqn-link-strip";
+    linkStrip.setAttribute("role", "navigation");
+    linkStrip.setAttribute("aria-label", "YouTube shortcuts");
     for (const link of LINKS) {
       if (!settings[link.key]) continue;
       const a = document.createElement("a");
-      a.className = "yqn-pill";
+      a.className = "yqn-link-icon";
       a.href = link.href;
-      if (link.title) a.title = link.title;
-      a.innerHTML = `<span class="yqn-ico">${link.icon}</span><span>${link.label}</span>`;
-      bar.appendChild(a);
+      const tip = link.title ? `${link.label} — ${link.title}` : link.label;
+      a.title = tip;
+      a.setAttribute("aria-label", link.label);
+      a.innerHTML = `<span class="yqn-ico">${link.icon}</span>`;
+      linkStrip.appendChild(a);
       hasLinks = true;
     }
+    if (hasLinks) bar.appendChild(linkStrip);
 
     // Separate the link section from the action toggles.
     if (
@@ -1145,7 +1152,7 @@
       btn.className = "yqn-pill yqn-pill-action";
       btn.type = "button";
       btn.title = "Save this video to Watch Later";
-      btn.innerHTML = `<span class="yqn-ico">➕</span><span class="yqn-btn-label">Save Later</span>`;
+      btn.innerHTML = `<span class="yqn-ico">➕</span><span class="yqn-btn-label">Save</span>`;
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         toggleWatchLater();
@@ -1159,7 +1166,7 @@
       btn.className = "yqn-pill yqn-pill-action";
       btn.type = "button";
       btn.title = "Copy a link to this video at the current time";
-      btn.innerHTML = `<span class="yqn-ico">🔗</span><span>Copy Link</span>`;
+      btn.innerHTML = `<span class="yqn-ico">🔗</span><span>Link</span>`;
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         copyTimestampLink();
@@ -1182,6 +1189,8 @@
     }
 
     if (settings.showJump) {
+      const group = document.createElement("span");
+      group.className = "yqn-topic-group";
       const mk = (id, icon, title, dir) => {
         const btn = document.createElement("button");
         btn.id = id;
@@ -1193,20 +1202,27 @@
           e.preventDefault();
           jumpChapter(dir);
         });
-        bar.appendChild(btn);
+        return btn;
       };
-      mk(
-        "yqn-back-btn",
-        "⏮",
-        "Back to the start of this chapter — press again for the previous one (no chapters: back 60s)",
-        -1
+      group.appendChild(
+        mk(
+          "yqn-back-btn",
+          "⏮",
+          "Back to the start of this chapter — press again for the previous one (no chapters: back 60s)",
+          -1
+        )
       );
-      mk("yqn-fwd-btn", "⏭", "Jump to the next chapter (no chapters: forward 60s)", 1);
-      const topics=document.createElement("button");
-      topics.id="yqn-topics-btn";topics.className="yqn-pill yqn-pill-action";topics.type="button";
-      topics.textContent="Topics";
-      topics.addEventListener("click",()=>{closeVideoTools=YqnVideoTools.open(videoToolsAPI,"Topics");});
-      bar.appendChild(topics);
+      const topics = document.createElement("button");
+      topics.id = "yqn-topics-btn";
+      topics.className = "yqn-pill yqn-pill-action";
+      topics.type = "button";
+      topics.textContent = "Topics";
+      topics.addEventListener("click", () => {
+        closeVideoTools = YqnVideoTools.open(videoToolsAPI, "Topics");
+      });
+      group.appendChild(topics);
+      group.appendChild(mk("yqn-fwd-btn", "⏭", "Jump to the next chapter (no chapters: forward 60s)", 1));
+      bar.appendChild(group);
     }
 
     if (settings.showVolume) {
@@ -1215,7 +1231,7 @@
       btn.className = "yqn-pill yqn-pill-action";
       btn.type = "button";
       btn.title = "Volume boost and even-out-loudness — click to show the controls";
-      btn.innerHTML = `<span class="yqn-ico">🔊</span><span>Volume</span>`;
+      btn.innerHTML = `<span class="yqn-ico">🔊</span><span>Vol</span>`;
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         volumeControlsOpen = !volumeControlsOpen;
@@ -1226,9 +1242,15 @@
     }
 
     if (settings.showTools !== false) {
-      const toolsButton=document.createElement("button");
-      toolsButton.type="button";toolsButton.id="yqn-tools-btn";toolsButton.className="yqn-pill yqn-pill-action";
-      toolsButton.textContent="Video tools";toolsButton.addEventListener("click",()=>{closeVideoTools=YqnVideoTools.open(videoToolsAPI) || closeVideoTools;});
+      const toolsButton = document.createElement("button");
+      toolsButton.type = "button";
+      toolsButton.id = "yqn-tools-btn";
+      toolsButton.className = "yqn-pill yqn-pill-action";
+      toolsButton.title = "Video tools: transcript search (Shift+F), notes, ask video, SponsorBlock & diagnostics";
+      toolsButton.innerHTML = `<span class="yqn-ico">🧰</span><span>Tools</span>`;
+      toolsButton.addEventListener("click", () => {
+        closeVideoTools = YqnVideoTools.open(videoToolsAPI) || closeVideoTools;
+      });
       bar.appendChild(toolsButton);
     }
     bar.appendChild(buildPlaybackStatus());
@@ -1379,11 +1401,11 @@
       const ico = btn.querySelector?.(".yqn-ico");
       const lbl = btn.querySelector?.(".yqn-btn-label");
       if (ico) ico.textContent = on ? "✓" : "➕";
-      if (lbl) lbl.textContent = on ? "Saved" : "Save Later";
+      if (lbl) lbl.textContent = on ? "Saved" : "Save";
       btn.title = on ? "Saved in Watch Later — click to remove" : "Save this video to Watch Later";
     } else if (btn.id === "yqn-like-btn") {
       const lbl = btn.querySelector?.(".yqn-btn-label");
-      if (lbl) lbl.textContent = on ? "Liked ✓" : "Like";
+      if (lbl) lbl.textContent = on ? "Liked" : "Like";
       btn.title = on ? "You liked this video — click to remove like" : "Like this video";
     }
   }
@@ -2739,10 +2761,10 @@
       applyState(btn, volumeActive());
       const label = btn.querySelectorAll("span")[1];
       if (label) {
-        const bits = [];
-        if (boost > 100) bits.push(boost + "%");
-        if (settings.volumeLevel) bits.push("even");
-        label.textContent = bits.length ? "Volume · " + bits.join(" + ") : "Volume";
+        if (boost > 100 && settings.volumeLevel) label.textContent = boost + "%+";
+        else if (boost > 100) label.textContent = boost + "%";
+        else if (settings.volumeLevel) label.textContent = "Even";
+        else label.textContent = "Vol";
       }
       btn.title =
         "Volume boost: " +

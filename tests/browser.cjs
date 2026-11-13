@@ -99,7 +99,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         summary:'Fixture summary',takeaways:['Fixture takeaway'],mentions:[]
       })}]}});
     });
-    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,ghReleaseVersion='1.45.0';
+    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,ghReleaseVersion='1.45.1';
     await context.route('https://api.github.com/**', async route => {
       const headers={'access-control-allow-origin':'*','content-type':'application/json'};
       return route.fulfill({status:200,headers,json:{
@@ -1435,12 +1435,17 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       // Distinct navigation links vs per-video action toggles (#yqn-wl-btn Save Later/Saved, #yqn-like-btn Like, History ↗, Watch Later ↗, Liked list ↗).
       await worker.evaluate(()=>chrome.storage.sync.set({showToggle:true,showLike:true,showWatchLater:true,showHistory:true,showLiked:true}));
       await page.locator('#yqn-wl-btn').waitFor();
-      assert.match(await page.locator('#yqn-wl-btn').textContent(),/Save Later|Saved/);
-      assert.equal(await page.locator('#yqn-quick-bar a[href="/playlist?list=WL"]').textContent(),'🕒Watch Later ↗');
-      assert.equal(await page.locator('#yqn-quick-bar a[href="/feed/history"]').textContent(),'📜History ↗');
-      assert.equal(await page.locator('#yqn-quick-bar a[href="/playlist?list=LL"]').textContent(),'❤️Liked list ↗');
+      assert.match(await page.locator('#yqn-wl-btn').textContent(),/Save|Saved/);
+      assert.equal(await page.locator('#yqn-quick-bar .yqn-link-strip a[href="/playlist?list=WL"]').getAttribute('aria-label'),'Watch Later ↗');
+      assert.equal(await page.locator('#yqn-quick-bar .yqn-link-strip a[href="/feed/history"]').textContent(),'📜');
+      assert.equal(await page.locator('#yqn-quick-bar .yqn-link-strip a[href="/playlist?list=LL"]').textContent(),'❤️');
+      await worker.evaluate(()=>chrome.storage.sync.set({showSubscriptions:true,showLibrary:true,showCopyLink:true,showPeak:true,showJump:true,showVolume:true,showTools:true,showLoop:true,showScreenshot:true,showSpeed:true,showTldr:true,showCut:true}));
+      await page.evaluate(()=>{document.querySelector('ytd-watch-metadata').style.width='1120px';});
+      await page.locator('#yqn-quick-bar .yqn-topic-group #yqn-topics-btn').waitFor();
+      const singleRow=await page.evaluate(()=>{const a=document.querySelector('#yqn-quick-bar .yqn-link-strip').getBoundingClientRect();const b=document.querySelector('#yqn-tools-btn').getBoundingClientRect();return Math.abs(a.top-b.top)<4;});
+      assert.equal(singleRow,true,'All 19 toolbar controls fit on a single row at 1120px watch width');
 
-      assert.equal(await popup.locator('#extVersion').textContent(),'v1.45.0');
+      assert.equal(await popup.locator('#extVersion').textContent(),'v1.45.1');
       await popup.locator('#checkUpdatesBtn').click();
       await page.waitForTimeout(50);
       await popup.waitForFunction(()=>!document.querySelector('#updateBanner')?.hidden);
