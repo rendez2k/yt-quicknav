@@ -229,7 +229,7 @@
     ['filler','Tangent / filler'],
     ['poi_highlight','Highlight (point of interest)'],
   ];
-  function sponsorBlockPayload({videoId,start,end,duration,category='sponsor',userId,version='1.44.1'}={}) {
+  function sponsorBlockPayload({videoId,start,end,duration,category='sponsor',userId,version='1.45.0'}={}) {
     if (typeof videoId!=='string'||!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new Error('This video does not have a valid 11-character YouTube video ID.');
     if (!sbCategories.some(([id])=>id===category)) throw new Error('Choose a valid SponsorBlock category.');
     if (typeof userId!=='string'||userId.trim().length<16) throw new Error('Local SponsorBlock submitter ID could not be generated.');
@@ -252,7 +252,7 @@
       endTime:Math.round(r.end*1000)/1000,
       category,
       userID:userId.trim(),
-      userAgent:`YouTubeQuickNav/${String(version||'1.44.1').replace(/[^\w.-]/g,'')}`,
+      userAgent:`YouTubeQuickNav/${String(version||'1.45.0').replace(/[^\w.-]/g,'')}`,
       actionType:isPoi?'poi':'skip',
     };
     if (Number.isFinite(duration)&&duration>0) out.videoDuration=Math.round(duration*1000)/1000;

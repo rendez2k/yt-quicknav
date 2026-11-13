@@ -353,6 +353,9 @@ test('cycleQuickSpeed, stepQuickSpeed, shouldAutoAdvancePlaylist and computeThum
   assert.match(runtimeBadge.title,/★ highlight at 2:05/);
 
   assert.equal(computeThumbnailBadge({durationSec:0,segments:[{start:0,end:45,action:'skip'}]}).label,'−0:45');
+  assert.equal(computeThumbnailBadge({durationSec:600,segments:[{start:10,end:50,action:'skip'}],prepared:true}).label,'⚡ → 9:20');
+  assert.match(computeThumbnailBadge({durationSec:600,segments:[{start:10,end:50,action:'skip'}],prepared:true}).title,/^Prepared · Effective runtime 9:20/);
+  assert.equal(computeThumbnailBadge({durationSec:0,segments:[{start:0,end:45,action:'skip'}],prepared:true}).label,'⚡ −0:45');
   assert.equal(computeThumbnailBadge({durationSec:300,segments:[],prepared:true}).label,'⚡ Ready');
   assert.equal(computeThumbnailBadge({durationSec:300,segments:[],poiHighlights:[80]}).label,'★ 1:20');
   assert.equal(computeThumbnailBadge({durationSec:300,segments:[{start:0,end:2,action:'skip'}]}).label,'');

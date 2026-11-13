@@ -47,6 +47,7 @@
     cutPreset: 'custom',
     thoroughAnalysis: false,
     watchLaterPrepare: false,
+    prepareBatchSize: 0,
     reviewBeforeApply: false,
     aiDailyBudget: 0,
     aiVideoBudget: 0,
@@ -133,19 +134,19 @@
     const hasPoi = validPois.length > 0;
     let label = '', title = '';
     if (dur > 0 && savedSec >= 5) {
-      label = `→ ${fmtStamp(effectiveSec)}`;
-      title = `Effective runtime ${fmtStamp(effectiveSec)} (saves ${fmtStamp(savedSec)})${hasPoi ? ` · ★ highlight at ${fmtStamp(validPois[0])}` : ''}`;
+      label = `${prepared ? '⚡ ' : ''}→ ${fmtStamp(effectiveSec)}`;
+      title = `${prepared ? 'Prepared · ' : ''}Effective runtime ${fmtStamp(effectiveSec)} (saves ${fmtStamp(savedSec)})${hasPoi ? ` · ★ highlight at ${fmtStamp(validPois[0])}` : ''}`;
     } else if (!dur && savedSec >= 5) {
-      label = `−${fmtStamp(savedSec)}`;
-      title = `Saves ~${fmtStamp(savedSec)} of cuts${hasPoi ? ` · ★ highlight at ${fmtStamp(validPois[0])}` : ''}`;
+      label = `${prepared ? '⚡ ' : ''}−${fmtStamp(savedSec)}`;
+      title = `${prepared ? 'Prepared · ' : ''}Saves ~${fmtStamp(savedSec)} of cuts${hasPoi ? ` · ★ highlight at ${fmtStamp(validPois[0])}` : ''}`;
     } else if (prepared) {
       label = '⚡ Ready';
-      title = 'Auto-Cut plan cached and ready';
+      title = `Auto-Cut plan cached and ready${hasPoi ? ` · ★ highlight at ${fmtStamp(validPois[0])}` : ''}`;
     } else if (hasPoi) {
       label = `★ ${fmtStamp(validPois[0])}`;
       title = `Community highlight at ${fmtStamp(validPois[0])}`;
     }
-    return { savedSec, effectiveSec, hasPoi, label, title };
+    return { savedSec, effectiveSec, hasPoi, prepared: !!prepared, label, title };
   }
   function presetPatch(id) {
     return {cutPreset: presets[id] ? id : 'custom', ...(presets[id]?.patch || {})};

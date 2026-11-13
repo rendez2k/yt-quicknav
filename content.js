@@ -832,7 +832,7 @@
     prepToggle.addEventListener('change',()=>chrome.storage.sync.set({watchLaterPrepare:prepToggle.checked}));
     prepLabel.append(prepToggle,document.createTextNode(' Prepare Watch Later automatically'));box.appendChild(prepLabel);
     const prepHint=document.createElement('div');prepHint.className='yqn-control-hint';
-    prepHint.textContent='Up to 5 videos every 30 minutes while Chrome is open. Reuses one muted, paused tab in a separate minimised window. Uses your enabled analysis sources and spending limits. Existing prepared videos are reused.';box.appendChild(prepHint);
+    prepHint.textContent='Up to 15 free videos (5 with AI, or your batch setting) every 30 minutes while Chrome is open. Reuses one muted, paused tab in a separate minimised window. Uses your enabled analysis sources and spending limits. Prepared videos show ⚡ on Watch Later thumbnails.';box.appendChild(prepHint);
     const prepStatus=document.createElement('div');prepStatus.className='yqn-control-hint yqn-prepare-status';prepStatus.setAttribute('role','status');box.appendChild(prepStatus);
     localGet({yqnPreparationV1:{}},s=>{prepStatus.textContent=s.yqnPreparationV1.message||'Not started';});
     for(const [label,type] of [['Prepare Watch Later now','yqn-prepare-start'],['Stop preparation','yqn-prepare-stop']]){
@@ -933,11 +933,11 @@
 
   // Quick-link definitions. `key` matches a setting flag.
   const LINKS = [
-    { key: "showHistory",       label: "History",       icon: "🕘", href: "/feed/history" },
-    { key: "showWatchLater",    label: "Watch Later",   icon: "🕒", href: "/playlist?list=WL" },
-    { key: "showSubscriptions", label: "Subscriptions", icon: "📺", href: "/feed/subscriptions" },
-    { key: "showLiked",         label: "Liked",         icon: "👍", href: "/playlist?list=LL" },
-    { key: "showLibrary",       label: "Library",       icon: "📚", href: "/feed/you" },
+    { key: "showHistory",       label: "History ↗",       icon: "📜", href: "/feed/history",       title: "Open Watch History" },
+    { key: "showWatchLater",    label: "Watch Later ↗",   icon: "🕒", href: "/playlist?list=WL",   title: "Open Watch Later playlist" },
+    { key: "showSubscriptions", label: "Subscriptions ↗", icon: "📺", href: "/feed/subscriptions", title: "Open Subscriptions feed" },
+    { key: "showLiked",         label: "Liked list ↗",    icon: "❤️", href: "/playlist?list=LL",   title: "Open Liked videos playlist" },
+    { key: "showLibrary",       label: "Library ↗",       icon: "📚", href: "/feed/you",           title: "Open YouTube Library" },
   ];
 
   /* ---------- helpers ---------- */
@@ -998,6 +998,7 @@
       const a = document.createElement("a");
       a.className = "yqn-pill";
       a.href = link.href;
+      if (link.title) a.title = link.title;
       a.innerHTML = `<span class="yqn-ico">${link.icon}</span><span>${link.label}</span>`;
       bar.appendChild(a);
       hasLinks = true;
@@ -1129,7 +1130,8 @@
       btn.id = "yqn-like-btn";
       btn.className = "yqn-pill yqn-pill-action";
       btn.type = "button";
-      btn.innerHTML = `<span class="yqn-ico">👍</span><span>Like</span>`;
+      btn.title = "Like this video";
+      btn.innerHTML = `<span class="yqn-ico">👍</span><span class="yqn-btn-label">Like</span>`;
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         toggleLike();
@@ -1142,7 +1144,8 @@
       btn.id = "yqn-wl-btn";
       btn.className = "yqn-pill yqn-pill-action";
       btn.type = "button";
-      btn.innerHTML = `<span class="yqn-ico">🕒</span><span>Watch Later</span>`;
+      btn.title = "Save this video to Watch Later";
+      btn.innerHTML = `<span class="yqn-ico">➕</span><span class="yqn-btn-label">Save Later</span>`;
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         toggleWatchLater();
@@ -1372,6 +1375,17 @@
     btn.classList.toggle("yqn-state-on", !!on);
     btn.classList.toggle("yqn-state-off", !on);
     btn.setAttribute("aria-pressed", String(!!on));
+    if (btn.id === "yqn-wl-btn") {
+      const ico = btn.querySelector?.(".yqn-ico");
+      const lbl = btn.querySelector?.(".yqn-btn-label");
+      if (ico) ico.textContent = on ? "✓" : "➕";
+      if (lbl) lbl.textContent = on ? "Saved" : "Save Later";
+      btn.title = on ? "Saved in Watch Later — click to remove" : "Save this video to Watch Later";
+    } else if (btn.id === "yqn-like-btn") {
+      const lbl = btn.querySelector?.(".yqn-btn-label");
+      if (lbl) lbl.textContent = on ? "Liked ✓" : "Like";
+      btn.title = on ? "You liked this video — click to remove like" : "Like this video";
+    }
   }
 
   // Keep the ✂️ button's colour, label (with cut count) and tooltip in sync
@@ -4034,23 +4048,62 @@
     return 0;
   }
 
+  let cachedThumbPlans = null;
+  let cachedThumbLoadTask = null;
+  let cachedThumbPaintTimer = null;
+  let cachedThumbFollowupTimer = null;
+
+  async function ensureCachedThumbPlans() {
+    if (cachedThumbPlans !== null) return cachedThumbPlans;
+    if (cachedThumbLoadTask) return cachedThumbLoadTask;
+    cachedThumbLoadTask = (async () => {
+      try {
+        if (chrome.storage?.local) {
+          const store = await readLocal([CUT_CACHE_KEY]);
+          cachedThumbPlans = store?.[CUT_CACHE_KEY] && typeof store[CUT_CACHE_KEY] === "object" ? store[CUT_CACHE_KEY] : {};
+        } else {
+          cachedThumbPlans = {};
+        }
+      } catch {
+        cachedThumbPlans = {};
+      } finally {
+        cachedThumbLoadTask = null;
+      }
+      return cachedThumbPlans;
+    })();
+    return cachedThumbLoadTask;
+  }
+
+  function extractThumbTarget(anchor) {
+    if (!anchor || !anchor.href) return null;
+    const card = anchor.closest?.(THUMB_CARD_SELECTOR) || (anchor.id === "thumbnail" ? anchor : null);
+    if (!card) return null;
+    let vid = "";
+    try {
+      const u = new URL(anchor.href, location.origin);
+      if (u.origin !== location.origin || u.pathname !== "/watch") return null;
+      vid = u.searchParams.get("v") || "";
+    } catch {
+      return null;
+    }
+    if (!/^[\w-]{11}$/.test(vid) || (isWatchPage() && vid === getVideoId())) return null;
+    const thumbHost = (card.matches?.(THUMB_BOX_SELECTOR) ? card : card.querySelector?.(THUMB_BOX_SELECTOR)) || anchor;
+    return { card, thumbHost, vid };
+  }
+
   async function resolveThumbBadgeData(vid) {
     const now = Date.now();
     const cached = thumbBadgeCache.get(vid);
     if (cached && now - cached.ts < 300000) return cached.data;
     let data = null;
-    if (chrome.storage?.local) {
-      try {
-        const store = await readLocal([CUT_CACHE_KEY]);
-        const hit = store[CUT_CACHE_KEY]?.[vid];
-        if (hit && Array.isArray(hit.segments) && now - hit.ts < CUT_CACHE_TTL) {
-          data = {
-            segments: hit.segments,
-            poiHighlights: hit.info?.poiHighlights || poiCache.get(vid) || [],
-            prepared: true,
-          };
-        }
-      } catch {}
+    const planCache = await ensureCachedThumbPlans();
+    const hit = planCache?.[vid];
+    if (hit && Array.isArray(hit.segments) && now - hit.ts < CUT_CACHE_TTL) {
+      data = {
+        segments: hit.segments,
+        poiHighlights: hit.info?.poiHighlights || poiCache.get(vid) || [],
+        prepared: true,
+      };
     }
     if (!data && settings.cutMessaging !== false) {
       try {
@@ -4095,32 +4148,81 @@
       badge.className = "yqn-thumb-badge";
       thumbHost.appendChild(badge);
     }
+    badge.classList?.toggle?.("yqn-thumb-badge-prepared", !!raw.prepared);
     badge.dataset.vid = vid;
+    badge.dataset.prepared = raw.prepared ? "1" : "0";
+    badge.dataset.hasDur = durationSec > 0 ? "1" : "0";
     badge.textContent = badgeInfo.label;
     badge.title = badgeInfo.title;
   }
+
+  async function paintCachedThumbBadges() {
+    if (!alive() || settings.showThumbBadges === false) return;
+    if (globalThis.YqnPreparation?.role && !globalThis.YqnPreparation.viewing) return;
+    const anchors = document.querySelectorAll?.('a[href*="/watch"]');
+    if (!anchors || !anchors.length) return;
+    const cache = await ensureCachedThumbPlans();
+    if (!cache || !alive() || settings.showThumbBadges === false) return;
+    const now = Date.now();
+    const seenHosts = new Set();
+    for (const anchor of anchors) {
+      const target = extractThumbTarget(anchor);
+      if (!target || seenHosts.has(target.thumbHost)) continue;
+      seenHosts.add(target.thumbHost);
+      const hit = cache[target.vid];
+      if (!hit || !Array.isArray(hit.segments) || now - hit.ts >= CUT_CACHE_TTL) continue;
+      const existing = target.thumbHost.querySelector?.(".yqn-thumb-badge");
+      if (existing && existing.dataset?.vid === target.vid && existing.dataset?.prepared === "1") {
+        if (existing.dataset?.hasDur === "1") continue;
+        const durNow = parseThumbDuration(target.card) || parseThumbDuration(target.thumbHost);
+        if (!durNow) continue;
+      }
+      const raw = {
+        segments: hit.segments,
+        poiHighlights: hit.info?.poiHighlights || poiCache.get(target.vid) || [],
+        prepared: true,
+      };
+      if (thumbBadgeCache.size >= 120 && !thumbBadgeCache.has(target.vid)) {
+        const oldest = thumbBadgeCache.keys().next().value;
+        if (oldest) thumbBadgeCache.delete(oldest);
+      }
+      thumbBadgeCache.set(target.vid, { ts: now, data: raw });
+      paintThumbBadge(target.card, target.thumbHost, target.vid, raw);
+    }
+  }
+
+  function scheduleCachedThumbPaint(delayMs = 120) {
+    if (settings.showThumbBadges === false) return;
+    if (cachedThumbPaintTimer) clearTimeout(cachedThumbPaintTimer);
+    cachedThumbPaintTimer = setTimeout(() => {
+      cachedThumbPaintTimer = null;
+      void paintCachedThumbBadges();
+      if (cachedThumbFollowupTimer) clearTimeout(cachedThumbFollowupTimer);
+      cachedThumbFollowupTimer = setTimeout(() => {
+        cachedThumbFollowupTimer = null;
+        void paintCachedThumbBadges();
+      }, 650);
+    }, delayMs);
+  }
+
+  window.addEventListener?.(
+    "scroll",
+    () => {
+      if (alive() && settings.showThumbBadges !== false) scheduleCachedThumbPaint(140);
+    },
+    { passive: true, capture: true }
+  );
 
   document.addEventListener(
     "pointerover",
     (e) => {
       if (!alive() || settings.showThumbBadges === false) return;
       if (e.target?.closest?.("#yqn-quick-bar, #yqn-cut-panel, #yqn-tldr-panel, #yqn-tools, #movie_player")) return;
-      const anchor = e.target?.closest?.('a[href*="/watch"]');
-      if (!anchor || !anchor.href) return;
-      const card = anchor.closest?.(THUMB_CARD_SELECTOR) || (anchor.id === "thumbnail" ? anchor : null);
-      if (!card) return;
-      let vid = "";
-      try {
-        const u = new URL(anchor.href, location.origin);
-        if (u.origin !== location.origin || u.pathname !== "/watch") return;
-        vid = u.searchParams.get("v") || "";
-      } catch {
-        return;
-      }
-      if (!/^[\w-]{11}$/.test(vid) || (isWatchPage() && vid === getVideoId())) return;
-      const thumbHost = (card.matches?.(THUMB_BOX_SELECTOR) ? card : card.querySelector?.(THUMB_BOX_SELECTOR)) || anchor;
+      const target = extractThumbTarget(e.target?.closest?.('a[href*="/watch"]'));
+      if (!target) return;
+      const { card, thumbHost, vid } = target;
       const existing = thumbHost.querySelector?.(".yqn-thumb-badge");
-      if (existing && existing.dataset?.vid === vid) return;
+      if (existing && existing.dataset?.vid === vid && existing.dataset?.hasDur === "1") return;
       if (thumbHoverState?.vid === vid && thumbHoverState.thumbHost === thumbHost) return;
       if (thumbHoverState?.timer) clearTimeout(thumbHoverState.timer);
       const state = {
@@ -5605,6 +5707,7 @@
       resetVideoControls(prevVideo);
       cutIgnored = false;
     }
+    scheduleCachedThumbPaint(60);
     if (!isWatchPage()) {
       const bar = document.getElementById(BAR_ID);
       if (bar) bar.remove();
@@ -5665,6 +5768,13 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === "local") {
+        if (CUT_CACHE_KEY in changes) {
+          cachedThumbPlans = changes[CUT_CACHE_KEY].newValue || {};
+          for (const [vid, entry] of thumbBadgeCache.entries()) {
+            if (!entry.data?.prepared && cachedThumbPlans[vid]) thumbBadgeCache.delete(vid);
+          }
+          scheduleCachedThumbPaint(60);
+        }
         if(changes.yqnPreparationV1){const target=document.querySelector('.yqn-prepare-status');if(target)target.textContent=changes.yqnPreparationV1.newValue?.message||'Not started';}
         const editKey = editStorageKey(getVideoId());
         if (editKey in changes) {
@@ -5709,8 +5819,12 @@
         injectBar();
         updatePlaybackStatus();
       }
-      if ("showThumbBadges" in changes && settings.showThumbBadges === false) {
-        document.querySelectorAll?.(".yqn-thumb-badge").forEach((el) => el.remove());
+      if ("showThumbBadges" in changes) {
+        if (settings.showThumbBadges === false) {
+          document.querySelectorAll?.(".yqn-thumb-badge").forEach((el) => el.remove());
+        } else {
+          scheduleCachedThumbPaint(40);
+        }
       }
       if ("cleanEndscreen" in changes) syncCleanEndscreen();
       if ("redirectShorts" in changes && !isWatchPage()) handleShortsPage();
@@ -5876,6 +5990,7 @@
       if (!alive()) return;
       if (!isWatchPage()) {
         handleShortsPage();
+        void paintCachedThumbBadges();
         return;
       }
       if (!Object.keys(settings).some(k=>k.startsWith("show")&&settings[k])) return;

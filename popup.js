@@ -4,6 +4,7 @@ const DEFAULTS = { ...YqnControls.defaults };
 const VALUE_FIELDS = {
   cutPreset: "string",
   tldrDepth: "string",
+  prepareBatchSize: "number",
   aiDailyBudget: "number",
   aiVideoBudget: "number",
   jevInputPrice: "number",
@@ -226,7 +227,7 @@ void refreshTimeSaved();
 
 const UPDATE_STORAGE_KEY = "yqnUpdateStatusV1";
 const UPDATE_TTL_MS = 12 * 60 * 60 * 1000;
-const currentExtVersion = chrome.runtime?.getManifest?.()?.version || "1.44.1";
+const currentExtVersion = chrome.runtime?.getManifest?.()?.version || "1.45.0";
 const extVersionEl = document.getElementById("extVersion");
 if (extVersionEl) extVersionEl.textContent = `v${currentExtVersion}`;
 

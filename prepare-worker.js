@@ -7,7 +7,8 @@
   function locked(fn){const previous=serial;const task=(async()=>{try{await previous;}catch{}return fn();})();serial=task;return task;}
   const read=async()=> (await chrome.storage.local.get(KEY))[KEY] || {running:false,recent:{},message:'Not started'};
   const save=s=>chrome.storage.local.set({[KEY]:s});
-  const config=()=>chrome.storage.sync.get({...YqnCache.defaults,autoCut:false,watchLaterPrepare:false,autoIgnoreMusic:true,minCutMinutes:2,aiDailyBudget:0,aiVideoBudget:0});
+  const config=()=>chrome.storage.sync.get({...YqnCache.defaults,autoCut:false,watchLaterPrepare:false,prepareBatchSize:0,autoIgnoreMusic:true,minCutMinutes:2,aiDailyBudget:0,aiVideoBudget:0});
+  const batchLimit=c=>{const n=Math.floor(Number(c?.prepareBatchSize));if(Number.isFinite(n)&&n>=1&&n<=50)return n;return (c?.aiHighlights&&c?.anthropicKey)||(c?.jevCuts&&c?.typesafeKey)?5:15;};
   const identity=c=>JSON.stringify([YqnCache.key(c),c.autoIgnoreMusic,c.minCutMinutes,c.aiDailyBudget,c.aiVideoBudget]);
   const validId=id=>typeof id==='string'&&/^[\w-]{11}$/.test(id);
   function owns(job,tab){try{
@@ -85,10 +86,10 @@
     }catch{await stop(s,'Preparation could not open its minimised window. Try again from Auto-Cut.');return false;}
   }
   async function advance(s){
-    const c=await config();
+    const c=await config(),limit=batchLimit(c);
     if(!c.autoCut || (s.automatic&&!c.watchLaterPrepare))return stop(s,'Preparation stopped');
     if(s.job)return;
-    if(s.attempted>=5||!s.queue.length)return stop(s,`Finished: ${s.ready} ready · ${s.failed} incomplete · ${s.skipped} already prepared or left unchanged`);
+    if(s.attempted>=limit||(s.opened||0)>=Math.max(limit*3,25)||!s.queue.length)return stop(s,`Finished: ${s.ready} ready · ${s.failed} incomplete · ${s.skipped} already prepared or left unchanged`);
     const tabs=(await chrome.tabs.query({url:'https://www.youtube.com/watch*'})).filter(t=>t.id!==s.parked?.tabId||s.parked.viewing);
     const openIds=new Set(tabs.map(t=>{try{return new URL(t.url).searchParams.get('v');}catch{return null;}}));
     const cache=(await chrome.storage.local.get(YqnCache.storageKey))[YqnCache.storageKey]||{};
@@ -96,7 +97,7 @@
       const id=s.queue.shift(),hit=cache[id],recent=s.recent?.[id];
       if(openIds.has(id)||(hit&&Date.now()-hit.ts<YqnCache.ttl&&hit.settingsKey===YqnCache.key(c))||
           (recent?.key===identity(c)&&Date.now()-recent.at<86400000&&(recent.status!=='ready'||hit&&Date.now()-hit.ts<YqnCache.ttl))){s.skipped++;continue;}
-      s.attempted++;s.message=`Preparing video ${s.attempted} of at most 5 · ${s.ready} ready`;
+      s.attempted++;s.opened=(s.opened||0)+1;s.message=`Preparing video ${s.attempted} of at most ${limit} · ${s.ready} ready`;
       await open(s,'video',id);return;
     }
     return stop(s,`Finished: ${s.ready} ready · ${s.failed} incomplete · ${s.skipped} already prepared or left unchanged`);
@@ -107,7 +108,7 @@
     if(!manual&&!c.watchLaterPrepare)return {ok:true};
     if(!c.autoCut)return {ok:false,error:'Turn on Auto-Cut before preparing Watch Later'};
     if(!(c.cutMessaging||c.cutBoring||c.aiHighlights||c.jevCuts))return {ok:false,error:'Enable an analysis source first'};
-    const next={running:true,automatic:!manual,cycleAt:Date.now(),job:null,queue:[],attempted:0,ready:0,failed:0,skipped:0,
+    const next={running:true,automatic:!manual,cycleAt:Date.now(),job:null,queue:[],attempted:0,opened:0,ready:0,failed:0,skipped:0,
       recent:s.recent||{},message:'Checking Watch Later…'};
     for(const [id,r] of Object.entries(next.recent))if(Date.now()-r.at>YqnCache.ttl)delete next.recent[id];
     const opened=await open(next,'playlist',null);return opened?{ok:true,message:next.message}:{ok:false,error:next.message};
@@ -137,10 +138,11 @@
     if(!s.running||!owns(s.job,{id:sender.tab?.id,url:sender.url||sender.tab?.url}))return {ok:true,role:null};
     if(msg.type==='yqn-prepare-role')return {ok:true,role:s.job.kind,videoId:s.job.videoId,viewing:!!s.job.viewing};
     if(msg.type==='yqn-prepare-progress'&&s.job.kind==='video'){
+      const limit=batchLimit(await config());
       const count=v=>Number.isFinite(Number(v))?Math.min(100000,Math.max(0,Math.floor(Number(v)))):0;
       const total=count(msg.total),checked=Math.min(total,count(msg.checked));
       const title=typeof msg.title==='string'?msg.title.slice(0,100):'';
-      s.message=`Preparing video ${s.attempted} of at most 5 · ${s.ready} ready`+(title?' · '+title:'')+
+      s.message=`Preparing video ${s.attempted} of at most ${limit} · ${s.ready} ready`+(title?' · '+title:'')+
         (total?` · ${checked}/${total} caption lines checked`:'')+(s.job.viewing?' · Open for viewing':'');
       await save(s);return {ok:true};
     }
@@ -154,7 +156,7 @@
       const status=['ready','ignored','budget'].includes(msg.status)?msg.status:'incomplete';
       const c=await config();
       s.recent[s.job.videoId]={at:Date.now(),key:identity(c),status};
-      if(status==='ready')s.ready++;else if(status==='ignored')s.skipped++;else s.failed++;
+      if(status==='ready')s.ready++;else if(status==='ignored'){s.skipped++;s.attempted=Math.max(0,s.attempted-1);}else s.failed++;
       await retire(s);
       if(status==='budget')await stop(s,'Paused: AI spending limit reached');else await advance(s);
       return {ok:true};

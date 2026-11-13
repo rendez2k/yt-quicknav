@@ -41,22 +41,40 @@ test('opening a video while its role reply is arriving cannot reapply the pause 
   reply({role:'video',viewing:false});await context.YqnPreparation.ready;
   assert.equal(context.YqnPreparation.viewing,true);assert.equal(video.muted,false);assert.deepEqual([...events],[]);
 });
-test('Watch Later reuses one minimised window and muted tab for all five videos, then closes it',async()=>{
+test('Watch Later reuses one minimised window and muted tab for 15 free videos by default (5 with AI), and ignored clips do not consume slots',async()=>{
+  const batchIds=Array.from({length:20},(_,i)=>'video'+String(i).padStart(6,'0'));
   const h=await harness();assert.equal(h.created.length,0,'Default is off');
   await h.msg({type:'yqn-prepare-start'});assert.equal(h.state().job.kind,'playlist');
   assert.equal((await h.msg({type:'yqn-prepare-role'},h.jobSender())).role,'playlist');
-  await h.msg({type:'yqn-prepare-list',ids:[...ids,...ids,'https://evil.test']},h.jobSender());
-  for(let i=0;i<5;i++){
-    const job=h.state().job,tab=h.tabs.get(job.tabId);assert.equal(job.videoId,ids[i]);assert.equal(tab.active,true);assert.equal(tab.muted,true);
+  await h.msg({type:'yqn-prepare-list',ids:[...batchIds,...batchIds,'https://evil.test']},h.jobSender());
+  // First 2 clips are short/music ('ignored') — they must not steal from the 15 real videos.
+  for(let i=0;i<2;i++){
+    assert.equal(h.state().job.videoId,batchIds[i]);
+    await h.msg({type:'yqn-prepare-done',status:'ignored'},h.jobSender());
+  }
+  for(let i=2;i<17;i++){
+    const job=h.state().job,tab=h.tabs.get(job.tabId);assert.equal(job.videoId,batchIds[i]);assert.equal(tab.active,true);assert.equal(tab.muted,true);
     assert.equal(h.windows.get(job.windowId).state,'minimized');assert.equal(h.windows.get(job.windowId).focused,false);assert.equal(job.viewing,undefined);
     await h.msg({type:'yqn-cache-put',videoId:job.videoId,entry:{settingsKey:h.cache.key({...h.cache.defaults,...h.sync}),ts:Date.now(),segments:[{start:0,end:10,action:'keep'}]}});
     await h.msg({type:'yqn-prepare-done',status:'ready'},h.jobSender());
   }
-  assert.equal(h.state().running,false);assert.equal(h.state().ready,5);assert.equal(h.state().attempted,5);assert.equal(h.tabs.size,0);
+  assert.equal(h.state().running,false);assert.equal(h.state().ready,15);assert.equal(h.state().attempted,15);assert.equal(h.state().skipped,2);assert.equal(h.tabs.size,0);
   assert.equal(h.created.length,1);assert.equal(h.windowCreates.length,1);assert.equal(h.windows.size,1);assert.equal(h.windows.get(1).focused,true);
-  assert.equal(Object.keys(h.local.cutCacheV15).length,5);
-  await Promise.all(ids.slice(5).map(id=>h.msg({type:'yqn-cache-put',videoId:id,entry:{ts:Date.now(),segments:[{action:'keep'}]}})));
-  assert.equal(Object.keys(h.local.cutCacheV15).length,8);
+  assert.equal(Object.keys(h.local.cutCacheV15).length,15);
+
+  // Paid AI defaults to 5 unless prepareBatchSize is explicitly set.
+  const hAi=await harness({sync:{autoCut:true,aiHighlights:true,anthropicKey:'k'}});
+  await hAi.msg({type:'yqn-prepare-start'});
+  await hAi.msg({type:'yqn-prepare-list',ids:batchIds},hAi.jobSender());
+  for(let i=0;i<5;i++)await hAi.msg({type:'yqn-prepare-done',status:'ready'},hAi.jobSender());
+  assert.equal(hAi.state().running,false);assert.equal(hAi.state().attempted,5);
+
+  // Explicit prepareBatchSize overrides Auto.
+  const hCustom=await harness({sync:{autoCut:true,cutMessaging:true,prepareBatchSize:10}});
+  await hCustom.msg({type:'yqn-prepare-start'});
+  await hCustom.msg({type:'yqn-prepare-list',ids:batchIds},hCustom.jobSender());
+  for(let i=0;i<10;i++)await hCustom.msg({type:'yqn-prepare-done',status:'ready'},hCustom.jobSender());
+  assert.equal(hCustom.state().running,false);assert.equal(hCustom.state().attempted,10);
 });
 test('existing prepared and open videos are skipped; another tab cannot submit queue work',async()=>{
   const h=await harness();h.tabs.set(1,{id:1,url:'https://www.youtube.com/watch?v='+ids[0],active:true});

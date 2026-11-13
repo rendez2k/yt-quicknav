@@ -926,3 +926,8 @@ html.yqn-clean-endscreen:not(.yqn-peek-endscreen) #movie_player .annotation.iv-b
   text-overflow: ellipsis;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
+
+.yqn-thumb-badge.yqn-thumb-badge-prepared {
+  background: rgba(10, 22, 16, 0.92);
+  border-color: rgba(126, 231, 135, 0.6);
+}

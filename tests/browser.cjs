@@ -99,7 +99,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         summary:'Fixture summary',takeaways:['Fixture takeaway'],mentions:[]
       })}]}});
     });
-    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,ghReleaseVersion='1.44.1';
+    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,ghReleaseVersion='1.45.0';
     await context.route('https://api.github.com/**', async route => {
       const headers={'access-control-allow-origin':'*','content-type':'application/json'};
       return route.fulfill({status:200,headers,json:{
@@ -1413,7 +1413,34 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       const popup=await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`);
       assert.equal(await popup.locator('details').count(),1,'Popup must maintain single <details> element');
-      assert.equal(await popup.locator('#extVersion').textContent(),'v1.44.1');
+      // Auto-paint prepared Watch Later / playlist badges without hover (⚡ → mm:ss and ⚡ Ready).
+      await page.evaluate(()=>{
+        const wrap=document.createElement('div');
+        wrap.innerHTML='<div data-yqn-thumb="prep1" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepCut0001">Cut</a><span data-yqn-duration>10:00</span></div>' +
+          '<div data-yqn-thumb="prep2" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepClean01">Clean</a><span data-yqn-duration>4:44</span></div>';
+        document.body.appendChild(wrap);
+      });
+      await worker.evaluate(async()=>{
+        const now=Date.now();
+        await chrome.storage.local.set({cutCacheV15:{
+          prepCut0001:{ts:now,complete:true,segments:[{start:10,end:60,action:'skip'}]},
+          prepClean01:{ts:now,complete:true,segments:[]},
+        }});
+      });
+      await page.locator('[data-yqn-thumb="prep1"] .yqn-thumb-badge').waitFor();
+      await page.locator('[data-yqn-thumb="prep2"] .yqn-thumb-badge').waitFor();
+      assert.equal(await page.locator('[data-yqn-thumb="prep1"] .yqn-thumb-badge').textContent(),'⚡ → 9:10');
+      assert.equal(await page.locator('[data-yqn-thumb="prep2"] .yqn-thumb-badge').textContent(),'⚡ Ready');
+
+      // Distinct navigation links vs per-video action toggles (#yqn-wl-btn Save Later/Saved, #yqn-like-btn Like, History ↗, Watch Later ↗, Liked list ↗).
+      await worker.evaluate(()=>chrome.storage.sync.set({showToggle:true,showLike:true,showWatchLater:true,showHistory:true,showLiked:true}));
+      await page.locator('#yqn-wl-btn').waitFor();
+      assert.match(await page.locator('#yqn-wl-btn').textContent(),/Save Later|Saved/);
+      assert.equal(await page.locator('#yqn-quick-bar a[href="/playlist?list=WL"]').textContent(),'🕒Watch Later ↗');
+      assert.equal(await page.locator('#yqn-quick-bar a[href="/feed/history"]').textContent(),'📜History ↗');
+      assert.equal(await page.locator('#yqn-quick-bar a[href="/playlist?list=LL"]').textContent(),'❤️Liked list ↗');
+
+      assert.equal(await popup.locator('#extVersion').textContent(),'v1.45.0');
       await popup.locator('#checkUpdatesBtn').click();
       await page.waitForTimeout(50);
       await popup.waitForFunction(()=>!document.querySelector('#updateBanner')?.hidden);

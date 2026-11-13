@@ -279,31 +279,31 @@
     <hr />
 
     <div class="row">
-      <label for="showHistory">🕘 History</label>
+      <label for="showHistory">📜 History ↗ (page link)</label>
       <input type="checkbox" id="showHistory" />
     </div>
     <div class="row">
-      <label for="showWatchLater">🕒 Watch Later</label>
+      <label for="showWatchLater">🕒 Watch Later ↗ (playlist link)</label>
       <input type="checkbox" id="showWatchLater" />
     </div>
     <div class="row">
-      <label for="showSubscriptions">📺 Subscriptions</label>
+      <label for="showSubscriptions">📺 Subscriptions ↗ (page link)</label>
       <input type="checkbox" id="showSubscriptions" />
     </div>
     <div class="row">
-      <label for="showLiked">👍 Liked</label>
+      <label for="showLiked">❤️ Liked list ↗ (playlist link)</label>
       <input type="checkbox" id="showLiked" />
     </div>
     <div class="row">
-      <label for="showLibrary">📚 Library</label>
+      <label for="showLibrary">📚 Library ↗ (page link)</label>
       <input type="checkbox" id="showLibrary" />
     </div>
     <div class="row">
-      <label for="showLike">👍 Like (toggle)</label>
+      <label for="showLike">👍 Like video (toggle)</label>
       <input type="checkbox" id="showLike" />
     </div>
     <div class="row">
-      <label for="showToggle">🔁 Watch Later: toggle</label>
+      <label for="showToggle">➕ Save Later (Watch Later toggle)</label>
       <input type="checkbox" id="showToggle" />
     </div>
     <div class="row">
@@ -374,7 +374,18 @@
     </div>
     <div class="hint">Uses enabled Claude analysis for two passes per section: pacing and content review, then sponsor and boundary checks. Quick watch / Plus also speeds through routine detail while keeping key explanations normal. Longer videos take more time and API usage. Replaces Jev fast verdicts. Unchecked sections stay unchanged; community sponsor cuts start immediately.</div>
     <div class="row"><label for="watchLaterPrepare">Prepare Watch Later</label><input type="checkbox" id="watchLaterPrepare" /></div>
-    <div class="hint">Automatically prepares up to 5 videos every 30 minutes while Chrome is open and YouTube is signed in. Reuses one muted, paused tab in a separate minimised window, with your enabled providers and AI spending limits. Prepared results are reused when you watch.</div>
+    <div class="row sub">
+      <label for="prepareBatchSize" title="Maximum Watch Later videos prepared per run">Videos per batch</label>
+      <select id="prepareBatchSize">
+        <option value="0">Auto (15 free / 5 AI)</option>
+        <option value="5">5 videos</option>
+        <option value="10">10 videos</option>
+        <option value="15">15 videos</option>
+        <option value="25">25 videos</option>
+        <option value="50">50 videos</option>
+      </select>
+    </div>
+    <div class="hint">Automatically prepares up to 15 free videos (or 5 with paid AI, unless customised above) every 30 minutes while Chrome is open and YouTube is signed in. Reuses one muted, paused tab in a separate minimised window. Prepared videos light up immediately with ⚡ on Watch Later thumbnails.</div>
     <p id="preparationStatus" class="hint" role="status"></p>
     <button id="prepareNow" class="mini" type="button">Prepare now</button>
     <button id="prepareStop" class="mini" type="button">Stop</button>
