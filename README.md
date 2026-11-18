@@ -1,5 +1,11 @@
 # YouTube Quick Nav + Cinema
 
+## Smarter speed-through selection on long videos (duration-scaled valleys, passive caption verification & WPM tempering) — 1.46.0 (18 November 2026)
+
+- **No more multi-minute runaway heatmap speed-throughs on 20m–2h+ videos:** Replaces fixed `3s–5s` 100-bucket thresholds and the `Quick watch` below-median bug (`speedK = 1.0`, which sped through ~50% of steady talks) with duration-scaled valley detection (`cutsFromHeatmap`). Single noisy `36s–72s` buckets and multi-minute non-viral discussion chapters are kept at `1×`, chapter-click replay spikes are despiked so post-heading explanations aren't dragged below baseline, and total unverified heatmap cuts are capped.
+- **Passive caption loading for free Auto-Cut:** Free heatmap Auto-Cut now passively reuses watch-page captions (zero extra `/next` or `/player` calls and no caption-track flash) so rapid talkers (`175–220+ WPM`) are tempered down from `3×` to intelligible `2×`, spoken explanations are never teleport-skipped as `"dead zone"`, and conclusion/benchmark sentences, chapter openings, and SponsorBlock `poi_highlight`s are carved out at `1×`.
+- **Long-video AI & Jev guardrails + automatic stale cache invalidation:** Raises minimum highlight coverage ratios on 15m–60m+ videos (`24%–30%`), blocks multi-minute unhighlighted middle/tail stretches from becoming runaway `"off-highlight"` speed-throughs, prevents `jevWindows` from stretching a `45s` verdict across multi-minute uncaptioned demos/music, and versions `YqnCache` (`v2`) so pre-`1.46` cached speed-through plans automatically refresh.
+
 ## Single-row compact toolbar (`[📜 🕒 📺 ❤️ 📚]` icon strip & `[⏮ Topics ⏭]` stepper) — 1.45.1 (13 November 2026)
 
 - **Compact single-row toolbar layout:** Slims chip padding/height, groups the 5 YouTube page links into a 1-click `[📜 🕒 📺 ❤️ 📚]` icon capsule with hover tooltips, unifies `[⏮ | Topics · N | ⏭]` into a single stepper pill, and tightens verbose action labels (`🔊 150%+`, `🔗 Link`, `🧰 Tools`, `➕ Save` / `✓ Saved`) so all 19 controls fit cleanly on one row.
@@ -627,7 +633,7 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 
 ## Packaging for a friend (no keys shared)
 
-Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.45.1.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
+Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.46.0.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
 
 ## Development checks
 

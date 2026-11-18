@@ -99,7 +99,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         summary:'Fixture summary',takeaways:['Fixture takeaway'],mentions:[]
       })}]}});
     });
-    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,ghReleaseVersion='1.45.1';
+    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.46.0';
     await context.route('https://api.github.com/**', async route => {
       const headers={'access-control-allow-origin':'*','content-type':'application/json'};
       return route.fulfill({status:200,headers,json:{
@@ -112,12 +112,21 @@ test('installed extension: playback, preferences, editing, navigation, failures 
     await context.route('https://www.youtube.com/**', async route => {
       if (route.request().url().includes('/youtubei/v1/next')) {
         nextRequests++;
+        if (longHeatmapFixture) {
+          const heatMarkers=Array.from({length:100},(_,i)=>({
+            timeRangeStartMillis:i*36000,
+            markerDurationMillis:36000,
+            heatMarkerIntensityScoreNormalized:[10,40,70].includes(i)?0.95:(i===20?0.08:(i>=25&&i<=26?0.05:(i>=41&&i<=56?0.10:0.38))),
+          }));
+          return route.fulfill({json:{getTranscriptEndpoint:{params:'fixture'},frameworkUpdates:{entityBatchUpdate:{mutations:[{payload:{macroMarkersListEntity:{markersList:{heatMarkers}}}}]}}}});
+        }
         await new Promise(r=>setTimeout(r,1800));
         return route.fulfill({json:{getTranscriptEndpoint:{params:'fixture'}}});
       }
       if (route.request().url().includes('/youtubei/v1/get_transcript')) {
         transcriptRequests++;
         if(fallbackTranscript)return route.fulfill({json:{}});
+        if(longHeatmapFixture)return route.fulfill({json:{initialSegments:Array.from({length:720},(_,i)=>({transcriptSegmentRenderer:{startMs:String(i*5000),endMs:String((i+1)*5000),snippet:{runs:[{text:'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen'}]} }}))}});
         if(longVideoFixture)return route.fulfill({json:{initialSegments:Array.from({length:118},(_,i)=>({transcriptSegmentRenderer:{startMs:String((i+1)*30000),endMs:String((i+1)*30000+12000),snippet:{runs:[{text:i%2===0?`In section ${i+1} we benchmark cluster scaling under production traffic.`:`Overall, this architecture improves throughput by ${20+i}% compared to baseline.`}]}}}))}});
         return route.fulfill({json:{initialSegments:Array.from({length:60},(_,i)=>({
           transcriptSegmentRenderer:{startMs:String(i*10000),endMs:String((i+1)*10000),snippet:{runs:[{text:fixtureText(i)}]}}
@@ -1408,29 +1417,57 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       await page.keyboard.press('Escape');
       longVideoFixture=false;
 
+      // v1.46: 60-minute Quick watch heatmap + passive caption WPM tempering avoids multi-minute runaway speedups.
+      longVideoFixture=true;longHeatmapFixture=true;
+      await worker.evaluate(async()=>{
+        await chrome.storage.local.clear();
+        await chrome.storage.sync.set({
+          autoCut:true,cutPreset:'quick',cutBoring:true,autoCutPlus:true,cutMessaging:false,
+          speedRate:3,aiHighlights:false,jevCuts:false,thoroughAnalysis:false,minCutMinutes:0,
+        });
+      });
+      await page.goto('https://www.youtube.com/watch?v=videoLONG46');
+      await page.waitForFunction(()=>document.querySelector('video')?.duration===3600);
+      await page.waitForFunction(()=>/Auto-Cut · \d+/.test(document.querySelector('#yqn-cut-btn')?.textContent||''));
+      // 10-minute non-viral spoken plateau (1476..2052s) and post-spike chapter body (420s) stay at 1x!
+      await page.evaluate(()=>{const v=document.querySelector('video');v.currentTime=1700;return v.play();});
+      await page.waitForTimeout(250);
+      assert.equal(await page.evaluate(()=>document.querySelector('video').playbackRate),1,'10-minute non-viral spoken chapter stays at 1x');
+      await page.evaluate(()=>{document.querySelector('video').currentTime=420;});
+      await page.waitForTimeout(200);
+      assert.equal(await page.evaluate(()=>document.querySelector('video').playbackRate),1,'Post-spike chapter body stays at 1x');
+      // Genuine 2-bucket valley (900..972s) speeds up, tempered from 3x down to <=2.25x for 216-WPM rapid speech!
+      await page.evaluate(()=>{document.querySelector('video').currentTime=910;});
+      await page.waitForFunction(()=>{const r=document.querySelector('video')?.playbackRate||1;return r>1.5&&r<=2.25;});
+      await page.evaluate(()=>document.querySelector('video').pause());
+      longVideoFixture=false;longHeatmapFixture=false;
+
       // GitHub Releases popup update notifier (zero new permissions, strict repo allowlist, single <details>).
       ghReleaseVersion='1.99.0';
       const popup=await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`);
       assert.equal(await popup.locator('details').count(),1,'Popup must maintain single <details> element');
-      // Auto-paint prepared Watch Later / playlist badges without hover (⚡ → mm:ss and ⚡ Ready).
+      // Auto-paint prepared Watch Later / playlist badges without hover (⚡ → mm:ss and ⚡ Ready), ignoring pre-v2 stale cache keys.
       await page.evaluate(()=>{
         const wrap=document.createElement('div');
         wrap.innerHTML='<div data-yqn-thumb="prep1" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepCut0001">Cut</a><span data-yqn-duration>10:00</span></div>' +
-          '<div data-yqn-thumb="prep2" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepClean01">Clean</a><span data-yqn-duration>4:44</span></div>';
+          '<div data-yqn-thumb="prep2" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepClean01">Clean</a><span data-yqn-duration>4:44</span></div>' +
+          '<div data-yqn-thumb="prepStale" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepStale01">Stale</a><span data-yqn-duration>20:00</span></div>';
         document.body.appendChild(wrap);
       });
       await worker.evaluate(async()=>{
         const now=Date.now();
         await chrome.storage.local.set({cutCacheV15:{
-          prepCut0001:{ts:now,complete:true,segments:[{start:10,end:60,action:'skip'}]},
+          prepCut0001:{ts:now,settingsKey:'["v2",true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:10,end:60,action:'skip'}]},
           prepClean01:{ts:now,complete:true,segments:[]},
+          prepStale01:{ts:now,settingsKey:'[true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:0,end:900,action:'speed'}]},
         }});
       });
       await page.locator('[data-yqn-thumb="prep1"] .yqn-thumb-badge').waitFor();
       await page.locator('[data-yqn-thumb="prep2"] .yqn-thumb-badge').waitFor();
       assert.equal(await page.locator('[data-yqn-thumb="prep1"] .yqn-thumb-badge').textContent(),'⚡ → 9:10');
       assert.equal(await page.locator('[data-yqn-thumb="prep2"] .yqn-thumb-badge').textContent(),'⚡ Ready');
+      assert.equal(await page.locator('[data-yqn-thumb="prepStale"] .yqn-thumb-badge').count(),0,'Stale pre-v2 cached plans must not paint outdated badges');
 
       // Distinct navigation links vs per-video action toggles (#yqn-wl-btn Save Later/Saved, #yqn-like-btn Like, History ↗, Watch Later ↗, Liked list ↗).
       await worker.evaluate(()=>chrome.storage.sync.set({showToggle:true,showLike:true,showWatchLater:true,showHistory:true,showLiked:true}));
@@ -1445,7 +1482,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       const singleRow=await page.evaluate(()=>{const a=document.querySelector('#yqn-quick-bar .yqn-link-strip').getBoundingClientRect();const b=document.querySelector('#yqn-tools-btn').getBoundingClientRect();return Math.abs(a.top-b.top)<4;});
       assert.equal(singleRow,true,'All 19 toolbar controls fit on a single row at 1120px watch width');
 
-      assert.equal(await popup.locator('#extVersion').textContent(),'v1.45.1');
+      assert.equal(await popup.locator('#extVersion').textContent(),'v1.46.0');
       await popup.locator('#checkUpdatesBtn').click();
       await page.waitForTimeout(50);
       await popup.waitForFunction(()=>!document.querySelector('#updateBanner')?.hidden);

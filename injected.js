@@ -557,7 +557,9 @@
         })()
       : null;
 
-    const transcriptTask = needTranscript
+    const wantTranscript = !!needTranscript;
+    const passiveTranscript = needTranscript === "passive";
+    const transcriptTask = wantTranscript
       ? (async () => {
           let tsrc = "none";
 
@@ -573,7 +575,7 @@
           if (apiKey && context) {
             let params = liveWatch ? findTranscriptParams(liveWatch) : null;
             diag.paramsFromInitial = !!params;
-            if (!params) {
+            if (!params && (!passiveTranscript || nextPromise)) {
               const nj = await getNext();
               if (!current()) return;
               params = findTranscriptParams(nj);
@@ -620,7 +622,7 @@
             let tracks =
               (livePr && deepFindArray(livePr, "captionTracks")) ||
               (freshGlobals && deepFindArray(pr, "captionTracks"));
-            if (!tracks && apiKey && context) {
+            if (!tracks && !passiveTranscript && apiKey && context) {
               try {
                 const auth = await getAuth();
                 if (!current()) return;
@@ -645,7 +647,7 @@
               //    Its request carries a valid pot token and the interceptor
               //    above captures the response; the module is unloaded straight
               //    after so nothing visibly changes for long.
-              if (!payload.transcript.length) {
+              if (!payload.transcript.length && !passiveTranscript) {
                 const got = await nudgePlayerCaptions(videoId, track, diag);
                 if (got) {
                   payload.transcript = got;
@@ -859,7 +861,11 @@
       setTimeout(() => dataRequests.delete(data.requestId), 30000);
       let payload;
       try {
-        payload = await gatherAutocut(data.videoId, !!data.needHeatmap, !!data.needTranscript);
+        payload = await gatherAutocut(
+          data.videoId,
+          !!data.needHeatmap,
+          data.needTranscript === "passive" ? "passive" : !!data.needTranscript
+        );
       } catch {
         payload = {error: "YouTube data could not be read"};
       }

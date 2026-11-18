@@ -268,12 +268,15 @@
     if (!rawLines.length) return segments;
     const lines = rawLines.map((t, i) => {
       const start = +t.start;
+      const explicitEnd = Number.isFinite(+t.end) && +t.end > start ? +t.end : 0;
       const dur = Number.isFinite(+t.duration) && +t.duration > 0 ? +t.duration : 0;
-      const end = dur > 0
-        ? start + dur
-        : i + 1 < rawLines.length
-          ? Math.max(start + 0.5, Math.min(+rawLines[i + 1].start, start + 6))
-          : start + 4;
+      const end = explicitEnd > start
+        ? explicitEnd
+        : dur > 0
+          ? start + dur
+          : i + 1 < rawLines.length
+            ? Math.max(start + 0.5, Math.min(+rawLines[i + 1].start, start + 6))
+            : start + 4;
       const words = (String(t.text || '').trim().match(/\S+/g) || []).length;
       return { start, end, words };
     });
@@ -1444,5 +1447,424 @@
     return `${cleaned} - ${stamp}.png`;
   }
 
-  globalThis.YqnControls={defaults,sponsorPattern,presets,presetPatch,preferenceKeys,presetKeys,fmtStamp,normalizeBaseSpeed,cycleQuickSpeed,stepQuickSpeed,shouldAutoAdvancePlaylist,computeThumbnailBadge,computeRemainingWatchTime,formatRemainingClock,advanceAbLoop,parseShortsPath,buildFrameFilename,localDayKey,recordLifetimeSavings,summarizeLifetimeSavings,cleanEdits,editRange,applyEdits,coalesceMicroGaps,annotateSpeechDensity,resolveSpeedRate,effectiveSpeedEnd,nextBoundaryDelayMs,isTimeBuffered,shouldBurstShortSkip,formatSkipToast,tldrReelBudget,buildTldrDigest,formatTldrMarkdown,SavingsTracker,SilenceDetector};
+  function minHighlightCoverageRatio(duration = 0, plus = false) {
+    const dur = Number.isFinite(+duration) && +duration > 0 ? +duration : 0;
+    if (dur >= 1800) return plus ? 0.22 : 0.30;
+    if (dur >= 900) return plus ? 0.18 : 0.24;
+    return 0.12;
+  }
+
+  function speedOutsideHighlights(highlights, duration, { plus = false, skips = [] } = {}) {
+    const dur = Number.isFinite(+duration) && +duration > 0 ? +duration : 0;
+    if (!dur || !Array.isArray(highlights)) return [];
+    const MIN_GAP = 5;
+    const keep = [];
+    for (const h of highlights
+      .filter(r => r && Number.isFinite(+r.start) && Number.isFinite(+r.end))
+      .map(r => ({ start: Math.max(0, +r.start), end: Math.min(dur, +r.end) }))
+      .filter(r => r.end > r.start)
+      .sort((a, b) => a.start - b.start)) {
+      const last = keep[keep.length - 1];
+      if (last && h.start <= last.end) last.end = Math.max(last.end, h.end);
+      else keep.push(h);
+    }
+    const covered = keep.reduce((acc, h) => acc + Math.max(0, h.end - h.start), 0);
+    if (covered < dur * minHighlightCoverageRatio(dur, plus)) return [];
+
+    const rawGaps = [];
+    let cursor = 0;
+    for (const h of keep) {
+      if (h.start - cursor >= MIN_GAP) rawGaps.push({ start: cursor, end: h.start, trailing: false });
+      cursor = Math.max(cursor, h.end);
+    }
+    if (dur - cursor >= MIN_GAP) rawGaps.push({ start: cursor, end: dur, trailing: true });
+
+    const cleanSkips = (Array.isArray(skips) ? skips : [])
+      .filter(s => s && Number.isFinite(+s.start) && Number.isFinite(+s.end) && +s.end > +s.start)
+      .map(s => ({ start: Math.max(0, +s.start), end: Math.min(dur, +s.end) }))
+      .filter(s => s.end > s.start)
+      .sort((a, b) => a.start - b.start);
+
+    const maxInteriorGap = dur >= 600 ? (plus ? 210 : 150) : Infinity;
+    const maxTrailingGap = dur >= 900 ? (plus ? 120 : 90) : maxInteriorGap;
+    const out = [];
+    for (const g of rawGaps) {
+      let pieces = [{ start: g.start, end: g.end }];
+      for (const sk of cleanSkips) {
+        const next = [];
+        for (const p of pieces) {
+          if (sk.end <= p.start || sk.start >= p.end) { next.push(p); continue; }
+          if (sk.start > p.start) next.push({ start: p.start, end: sk.start });
+          if (sk.end < p.end) next.push({ start: sk.end, end: p.end });
+        }
+        pieces = next;
+      }
+      for (const p of pieces) {
+        const span = p.end - p.start;
+        if (span < MIN_GAP) continue;
+        const isTail = g.trailing && p.end >= dur - 1;
+        const limit = isTail ? maxTrailingGap : maxInteriorGap;
+        if (span > limit) continue;
+        out.push({ start: p.start, end: p.end, action: 'speed', reason: 'off-highlight' });
+      }
+    }
+    return out;
+  }
+
+  function cutsFromHeatmap(heatmap, { plus = false, duration = 0, chapters = [], poiHighlights = [], transcript = [] } = {}) {
+    const clean = (Array.isArray(heatmap) ? heatmap : [])
+      .filter(h => h && Number.isFinite(+h.start) && Number.isFinite(+h.end) && +h.end > +h.start)
+      .map(h => ({ start: +h.start, end: +h.end, score: Math.max(0, Math.min(1, +h.score || 0)) }))
+      .sort((a, b) => a.start - b.start);
+    const n = clean.length;
+    if (n < 5) return [];
+
+    const totalSpan = Math.max(+duration || 0, clean[n - 1].end - clean[0].start, 1);
+    const avgBucketSec = clean.reduce((acc, h) => acc + (h.end - h.start), 0) / n;
+
+    const percentile = (sorted, q) => {
+      if (!sorted.length) return 0;
+      const pos = Math.max(0, Math.min(sorted.length - 1, q * (sorted.length - 1)));
+      const lo = Math.floor(pos), hi = Math.ceil(pos);
+      return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+    };
+
+    const raw = clean.map(h => h.score);
+    const sortedRaw = [...raw].sort((a, b) => a - b);
+    const maxRaw = sortedRaw[n - 1] || 0;
+    // Flat or near-zero replay graphs carry no real scrub-skip signal.
+    if (maxRaw < 0.12 || maxRaw - (sortedRaw[0] || 0) < 0.08) {
+      return [];
+    }
+
+    const cleanChaps = (Array.isArray(chapters) ? chapters : [])
+      .filter(c => c && Number.isFinite(+c.start) && +c.start >= 0)
+      .map(c => ({ start: +c.start, title: String(c.title || '').trim() }))
+      .sort((a, b) => a.start - b.start);
+
+    // Chapter-click anchors and isolated viral spikes should not inflate the
+    // steady local baseline for the normal discussion that follows them.
+    const isChapAnchor = clean.map(h =>
+      cleanChaps.some(c => c.start > 3 && h.end > c.start - 2 && h.start <= c.start + Math.max(8, avgBucketSec * 0.5))
+    );
+    const despiked = raw.map((val, i) => {
+      let neighbors = [];
+      for (let j = Math.max(0, i - 3); j <= Math.min(n - 1, i + 3); j++) {
+        if (j !== i && !isChapAnchor[j]) neighbors.push(raw[j]);
+      }
+      if (neighbors.length < 2) {
+        neighbors = [];
+        for (let j = Math.max(0, i - 3); j <= Math.min(n - 1, i + 3); j++) {
+          if (j !== i) neighbors.push(raw[j]);
+        }
+      }
+      if (neighbors.length < 2) return val;
+      neighbors.sort((a, b) => a - b);
+      const nbMed = percentile(neighbors, 0.5);
+      if (isChapAnchor[i] && val > nbMed * 1.35) return nbMed;
+      if (val > Math.max(0.15, nbMed * 1.85)) return nbMed;
+      return val;
+    });
+
+    // Center-heavy kernel on wide buckets (>= 20s) prevents a 36s-72s peak from smearing 3+ minutes.
+    const sideW = avgBucketSec >= 20 ? 0.15 : 0.25;
+    const centerW = 1 - 2 * sideW;
+    const sm = raw.map((val, i) => {
+      const left = i > 0 ? raw[i - 1] : val;
+      const right = i + 1 < n ? raw[i + 1] : val;
+      return left * sideW + val * centerW + right * sideW;
+    });
+
+    const sortedDespiked = [...despiked].sort((a, b) => a - b);
+    const globBase = Math.max(percentile(sortedDespiked, 0.5), 0.0001);
+    const W = Math.max(5, Math.min(12, Math.round(n * 0.1)));
+    const baseAt = i => {
+      const lo = Math.max(0, i - W);
+      const hi = Math.min(n - 1, i + W);
+      const win = despiked.slice(lo, hi + 1).sort((a, b) => a - b);
+      const floor = i < n * 0.85 ? globBase * 0.68 : globBase * 0.45;
+      return Math.min(Math.max(percentile(win, 0.5), floor, 0.0001), globBase * 1.3);
+    };
+
+    const longFactor = totalSpan >= 1200 ? Math.min(0.10, ((totalSpan - 1200) / 2400) * 0.10) : 0;
+    const speedK = (plus ? 0.72 : 0.60) - longFactor;
+    const skipK = (plus ? 0.30 : 0.22) - longFactor * 0.5;
+    const minSkip = plus ? 6 : 8;
+    const minSpeed = plus ? 4 : 6;
+
+    const tier = i => {
+      const b = baseAt(i);
+      if (sm[i] < skipK * b && sm[i] < 0.16 && raw[i] < 0.18) return 2;
+      if (sm[i] < speedK * b && sm[i] < 0.48 && raw[i] < 0.52) return 1;
+      return 0;
+    };
+
+    // Normalize optional transcript for speech-density and high-signal sentence protection.
+    const seenCue = new Set();
+    const rawCues = (Array.isArray(transcript) ? transcript : [])
+      .filter(t => t && Number.isFinite(+t.start) && +t.start >= 0 && typeof t.text === 'string' && t.text.trim())
+      .sort((a, b) => +a.start - +b.start)
+      .filter(t => {
+        const k = `${+t.start}|${t.text.trim()}`;
+        if (seenCue.has(k)) return false;
+        seenCue.add(k);
+        return true;
+      });
+    const lines = rawCues.map((t, i) => {
+      const start = +t.start;
+      const explicitEnd = Number.isFinite(+t.end) && +t.end > start ? +t.end
+        : (Number.isFinite(+t.duration) && +t.duration > 0 ? start + +t.duration : 0);
+      const nextStart = i + 1 < rawCues.length ? +rawCues[i + 1].start : start + 5;
+      const end = explicitEnd > start ? explicitEnd : Math.max(start + 0.8, Math.min(nextStart, start + 7));
+      const text = t.text.replace(/\s+/g, ' ').trim();
+      const cleanWords = text.replace(/\[[^\]]*\]/g, ' ').trim();
+      const words = (cleanWords.match(/\S+/g) || []).length;
+      return {
+        start,
+        end,
+        text,
+        words,
+        isPromo: PROMO_LINE_RE.test(text),
+        isFluff: FLUFF_LINE_RE.test(text),
+      };
+    });
+    const maxCaptionEnd = lines.length ? lines[lines.length - 1].end : 0;
+
+    const speechStats = (a, b) => {
+      const span = Math.max(0.5, b - a);
+      let words = 0, speechSec = 0, fluffSec = 0;
+      for (const l of lines) {
+        if (l.end <= a) continue;
+        if (l.start >= b) break;
+        const ov = Math.max(0, Math.min(b, l.end) - Math.max(a, l.start));
+        if (ov <= 0) continue;
+        const frac = ov / Math.max(0.4, l.end - l.start);
+        if (l.words > 0) words += l.words * frac;
+        if (l.isFluff || l.isPromo) fluffSec += ov;
+        else if (l.words > 0) speechSec += ov;
+      }
+      return { words, wpm: (words / span) * 60, speechSec, fluffSec };
+    };
+
+    // Group contiguous dull buckets into valleys so bucket-count and plateau
+    // checks evaluate the whole dip rather than splitting at speed/skip transitions.
+    const valleys = [];
+    let curV = null;
+    for (let i = 0; i < n; i++) {
+      const t = tier(i);
+      if (t === 0) {
+        if (curV) { valleys.push(curV); curV = null; }
+        continue;
+      }
+      if (!curV) {
+        curV = { startIdx: i, endIdx: i, start: clean[i].start, end: clean[i].end, items: [{ i, t }] };
+      } else {
+        curV.endIdx = i;
+        curV.end = clean[i].end;
+        curV.items.push({ i, t });
+      }
+    }
+    if (curV) valleys.push(curV);
+
+    const minBuckets = totalSpan >= 1200 || avgBucketSec >= 15 ? 2 : 1;
+    const candidates = [];
+
+    for (const v of valleys) {
+      const bucketCount = v.items.length;
+      const vDur = v.end - v.start;
+      if (bucketCount < minBuckets || vDur < minSpeed) continue;
+
+      const vAvgScore = v.items.reduce((acc, x) => acc + sm[x.i], 0) / bucketCount;
+      const vAvgBase = v.items.reduce((acc, x) => acc + baseAt(x.i), 0) / bucketCount;
+      const relDrop = vAvgScore / Math.max(0.0001, vAvgBase);
+
+      const leftShoulder = v.startIdx > 0 && raw[v.startIdx - 1] >= Math.max(0.22, vAvgScore * 2.2);
+      const rightShoulder = v.endIdx + 1 < n && raw[v.endIdx + 1] >= Math.max(0.22, vAvgScore * 2.2);
+      const maxValleySec = leftShoulder && rightShoulder
+        ? Math.min(plus ? 135 : 100, Math.max(plus ? 110 : 80, avgBucketSec * 3.1))
+        : (plus ? 105 : 75);
+
+      if (vDur > maxValleySec) {
+        // Multi-minute low-replay stretches are non-viral discussion chapters,
+        // NOT scrub-past valleys — never blanket-speed 3-15 minutes of speech.
+        if (lines.length && maxCaptionEnd > v.start + 5) {
+          const scanEnd = Math.min(v.end, maxCaptionEnd + 2);
+          let winRun = null;
+          const step = 6;
+          for (let t = v.start; t + step <= scanEnd + 0.5; t += step) {
+            const wEnd = Math.min(scanEnd, t + step);
+            if (wEnd - t < 3) break;
+            const st = speechStats(t, wEnd);
+            const isLowValue = st.wpm < 24 || st.fluffSec >= (wEnd - t) * 0.5;
+            if (isLowValue) {
+              if (!winRun) winRun = { start: t, end: wEnd };
+              else if (wEnd - winRun.start <= maxValleySec) winRun.end = wEnd;
+              else {
+                if (winRun.end - winRun.start >= Math.max(8, minSpeed)) {
+                  candidates.push({ start: winRun.start, end: winRun.end, action: 'speed', reason: 'low replays', _rel: relDrop });
+                }
+                winRun = null;
+              }
+            } else if (winRun) {
+              if (winRun.end - winRun.start >= Math.max(8, minSpeed)) {
+                candidates.push({ start: winRun.start, end: winRun.end, action: 'speed', reason: 'low replays', _rel: relDrop });
+              }
+              winRun = null;
+            }
+          }
+          if (winRun && winRun.end - winRun.start >= Math.max(8, minSpeed)) {
+            candidates.push({ start: winRun.start, end: winRun.end, action: 'speed', reason: 'low replays', _rel: relDrop });
+          }
+        } else if (!lines.length && v.end >= totalSpan - avgBucketSec * 0.5 && raw[v.endIdx] < 0.12) {
+          const tailLen = Math.min(45, avgBucketSec * 1.2);
+          if (tailLen >= minSpeed) {
+            candidates.push({ start: Math.max(v.start, v.end - tailLen), end: v.end, action: 'speed', reason: 'low replays', _rel: relDrop });
+          }
+        }
+        continue;
+      }
+
+      // On long videos, reject mild replay dips when captions show continuous dense non-fluff explanation.
+      if (totalSpan >= 1200 && lines.length && maxCaptionEnd > v.start + 5) {
+        const st = speechStats(v.start, v.end);
+        if (st.wpm >= 110 && st.speechSec / Math.max(1, vDur) >= 0.70 && st.fluffSec === 0 && relDrop >= 0.35) {
+          continue;
+        }
+      }
+
+      let sub = null;
+      const valleySegs = [];
+      for (const { i, t } of v.items) {
+        let effTier = t;
+        // Never teleport-skip active spoken content from heatmap data alone.
+        if (effTier === 2) {
+          if (totalSpan >= 900 && clean[i].end - clean[i].start > 45) effTier = 1;
+          else if (lines.length && maxCaptionEnd > clean[i].start + 2) {
+            const st = speechStats(clean[i].start, clean[i].end);
+            if (st.wpm >= 35 && st.fluffSec < (clean[i].end - clean[i].start) * 0.5) effTier = 1;
+          }
+        }
+        if (sub && sub._tier === effTier) {
+          sub.end = clean[i].end;
+          sub._count++;
+        } else {
+          if (sub) valleySegs.push(sub);
+          sub = {
+            start: clean[i].start,
+            end: clean[i].end,
+            action: effTier === 2 ? 'skip' : 'speed',
+            reason: effTier === 2 ? 'dead zone' : 'low replays',
+            _tier: effTier,
+            _count: 1,
+            _rel: relDrop,
+          };
+        }
+      }
+      if (sub) valleySegs.push(sub);
+
+      // Avoid jarring speed -> 1-bucket jump -> speed inside a coarse-bucket valley.
+      const smoothedValley = [];
+      for (let k = 0; k < valleySegs.length; k++) {
+        const cur = { ...valleySegs[k] };
+        const prev = smoothedValley[smoothedValley.length - 1];
+        const next = valleySegs[k + 1];
+        if (cur.action === 'skip' && cur._count === 1 && avgBucketSec >= 15 &&
+            ((prev && prev.action === 'speed') || (next && next.action === 'speed') || (totalSpan >= 900 && cur.end - cur.start > 45))) {
+          cur.action = 'speed';
+          cur.reason = 'low replays';
+        }
+        if (cur.action === 'skip' && totalSpan >= 900 && cur.end - cur.start > 45) {
+          cur.action = 'speed';
+          cur.reason = 'low replays';
+        }
+        if (prev && prev.action === cur.action) {
+          prev.end = cur.end;
+          prev._rel = Math.min(prev._rel, cur._rel);
+        } else {
+          smoothedValley.push(cur);
+        }
+      }
+      candidates.push(...smoothedValley);
+    }
+
+    if (!candidates.length) return [];
+
+    // Build protected keep islands: topic openings, community POIs, and concrete conclusion/evidence sentences.
+    const rawProtected = [];
+    const nonContentChapRe = /^(?:intro|introduction|welcome|sponsor|sponsored|ad|advert|advertisement|promo|outro|credits|ending|subscribe)\b/i;
+    for (const c of cleanChaps) {
+      if (nonContentChapRe.test(c.title)) continue;
+      const protectSpan = c.start < 2 ? 12 : Math.min(20, Math.max(12, avgBucketSec * 0.45));
+      rawProtected.push({ start: c.start, end: c.start + protectSpan });
+    }
+    for (const rawPoi of Array.isArray(poiHighlights) ? poiHighlights : []) {
+      const pt = Number.isFinite(+rawPoi) ? +rawPoi : +rawPoi?.start;
+      if (Number.isFinite(pt) && pt >= 0) {
+        rawProtected.push({ start: Math.max(0, pt - 4), end: pt + 14 });
+      }
+    }
+    if (lines.length) {
+      const { units, hasPunctuation } = buildSentenceUnits(lines);
+      for (const u of units) {
+        if (PROMO_LINE_RE.test(u.text) || FLUFF_LINE_RE.test(u.text)) continue;
+        if (!isCompleteThought(u.text, hasPunctuation)) continue;
+        if (STRONG_VERDICT_RE.test(u.text) || VERDICT_CUE_RE.test(u.text) || EVIDENCE_CUE_RE.test(u.text)) {
+          rawProtected.push({ start: Math.max(0, u.start - 1.2), end: u.end + 1.2 });
+        }
+      }
+    }
+
+    rawProtected.sort((a, b) => a.start - b.start);
+    const protectedRanges = [];
+    for (const r of rawProtected) {
+      if (!(r.end > r.start)) continue;
+      const last = protectedRanges[protectedRanges.length - 1];
+      if (last && r.start <= last.end + 0.5) last.end = Math.max(last.end, r.end);
+      else protectedRanges.push({ start: r.start, end: r.end });
+    }
+
+    let carved = candidates;
+    for (const pr of protectedRanges) {
+      const next = [];
+      for (const seg of carved) {
+        if (pr.end <= seg.start || pr.start >= seg.end) { next.push(seg); continue; }
+        if (pr.start > seg.start) next.push({ ...seg, end: pr.start });
+        if (pr.end < seg.end) next.push({ ...seg, start: pr.end });
+      }
+      carved = next;
+    }
+
+    const filtered = carved.filter(s =>
+      s.action === 'skip' ? s.end - s.start >= minSkip : s.end - s.start >= minSpeed
+    );
+    if (!filtered.length) return [];
+
+    // Cap total unverified heatmap cuts across the video, prioritizing deepest drops.
+    const maxShare = totalSpan >= 1200 ? (plus ? 0.22 : 0.15) : (plus ? 0.32 : 0.22);
+    const maxBudgetSec = Math.max(minSpeed, totalSpan * maxShare);
+    const totalCutSec = filtered.reduce((acc, s) => acc + (s.end - s.start), 0);
+    let finalSegs = filtered;
+    if (totalCutSec > maxBudgetSec) {
+      const ranked = [...filtered].sort((a, b) => a._rel - b._rel || a.start - b.start);
+      const picked = [];
+      let used = 0;
+      for (const s of ranked) {
+        const len = s.end - s.start;
+        if (used + len <= maxBudgetSec || (!picked.length && len <= maxBudgetSec * 1.25)) {
+          picked.push(s);
+          used += len;
+        }
+      }
+      finalSegs = picked.sort((a, b) => a.start - b.start);
+    }
+
+    return finalSegs.map(s => ({
+      start: Math.round(s.start * 100) / 100,
+      end: Math.round(s.end * 100) / 100,
+      action: s.action,
+      reason: s.reason,
+    }));
+  }
+
+  globalThis.YqnControls={defaults,sponsorPattern,presets,presetPatch,preferenceKeys,presetKeys,fmtStamp,normalizeBaseSpeed,cycleQuickSpeed,stepQuickSpeed,shouldAutoAdvancePlaylist,computeThumbnailBadge,computeRemainingWatchTime,formatRemainingClock,advanceAbLoop,parseShortsPath,buildFrameFilename,minHighlightCoverageRatio,speedOutsideHighlights,cutsFromHeatmap,localDayKey,recordLifetimeSavings,summarizeLifetimeSavings,cleanEdits,editRange,applyEdits,coalesceMicroGaps,annotateSpeechDensity,resolveSpeedRate,effectiveSpeedEnd,nextBoundaryDelayMs,isTimeBuffered,shouldBurstShortSkip,formatSkipToast,tldrReelBudget,buildTldrDigest,formatTldrMarkdown,SavingsTracker,SilenceDetector};
 })();

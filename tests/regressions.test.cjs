@@ -860,3 +860,146 @@ test('A-B loop wraps playback, suppresses overlapping Auto-Cut skips, and Shorts
   assert.equal(api.handleShortsPage(), true);
   assert.equal(replacedUrl, 'https://www.youtube.com/watch?v=videoBBBBBB&t=9s');
 });
+
+test('v1.46: free Auto-Cut requests passive captions to temper rapid-talker speedups and Jev bounds uncaptioned visual gaps', async () => {
+  const { api, video } = harness();
+  video.duration = 1800;
+  video.paused = false;
+  video.seeking = false;
+  video.playbackRate = 1;
+
+  api.setSettings({
+    autoCut: true,
+    cutMessaging: false,
+    cutBoring: true,
+    autoCutPlus: false,
+    aiHighlights: false,
+    jevCuts: false,
+    thoroughAnalysis: false,
+    speedRate: 3,
+  });
+
+  let seenNeedTranscript = null;
+  const heatmap = Array.from({ length: 60 }, (_, i) => ({
+    start: i * 30,
+    end: (i + 1) * 30,
+    score: i >= 10 && i <= 11 ? 0.06 : 0.65, // 300..360s = 2-bucket (60s) low-replay valley
+  }));
+  const rapidTranscript = [];
+  for (let t = 0; t < 1800; t += 5) {
+    rapidTranscript.push({
+      start: t,
+      end: t + 5,
+      text: 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen',
+    }); // 216 WPM
+  }
+
+  api.setPageData(async (_vid, _needHeat, needTrans) => {
+    seenNeedTranscript = needTrans;
+    return { duration: 1800, heatmap, transcript: rapidTranscript };
+  });
+
+  const plan = await api.realBuildCutPlan('videoAAAAAA', () => true, () => {});
+  assert.equal(seenNeedTranscript, 'passive', 'Free heatmap Auto-Cut should request passive captions');
+  const speedSeg = plan.segments.find((s) => s.action === 'speed');
+  assert.ok(speedSeg, 'Expected genuine 2-bucket heatmap valley to produce a speed segment');
+  assert.ok(speedSeg.wpm >= 205, `Expected passive captions to annotate rapid WPM, got ${speedSeg.wpm}`);
+
+  api.setPlan({ videoId: 'videoAAAAAA', segments: plan.segments });
+  video.currentTime = speedSeg.start + 5;
+  api.onCutTick({ target: video });
+  assert.ok(video.playbackRate <= 2.25 && video.playbackRate > 1.5, `Rapid 216-WPM speaker should be tempered from 3x down to <=2.25x, got ${video.playbackRate}`);
+
+  // Jev windows must NOT stretch a 40s filler verdict across a 4-minute uncaptioned live demo or 5-minute uncaptioned tail.
+  api.setProxy(async () => ({
+    ok: true,
+    status: 200,
+    body: {
+      answers: {
+        w0: { choice: 'speed', probabilities: { speed: 0.92 } },
+        w1: { choice: 'speed', probabilities: { speed: 0.91 } },
+      },
+    },
+  }));
+  const sparseVisualTranscript = [
+    { start: 0, end: 12, text: 'Hey folks welcome back to the stream today.' },
+    { start: 13, end: 26, text: 'Grab some coffee while people trickle into chat.' },
+    { start: 27, end: 39, text: 'Before we start the live synth jam let me adjust my mic.' },
+    // 4-minute uncaptioned live synth performance from 39s to 280s!
+    { start: 280, end: 294, text: 'Hope you enjoyed that jam, let me ramble a bit.' },
+    { start: 295, end: 312, text: 'Anyway nothing much else to say right now.' },
+    // Nearly 5-minute uncaptioned outro jam from 312s to 600s!
+  ];
+  const jevSegs = await api.jevCutSegments(sparseVisualTranscript, 600, () => true);
+  const jevSpeeds = jevSegs.filter((s) => s.action === 'speed');
+  assert.equal(jevSpeeds.length, 2);
+  assert.ok(jevSpeeds[0].end <= 42, `First Jev speed must stop before 4m uncaptioned demo, got end=${jevSpeeds[0].end}`);
+  assert.ok(jevSpeeds[1].end <= 315, `Trailing Jev speed must stop before 5m uncaptioned jam, got end=${jevSpeeds[1].end}`);
+});
+
+test('v1.46: injected passive caption mode avoids extra /next and /player requests when watch data has no transcript', async () => {
+  const posted = [];
+  const fetchCalls = [];
+  const unrefTimeout = (fn, ms) => { const t = setTimeout(fn, ms); t.unref(); return t; };
+  const flexy = {
+    playerData: {
+      videoDetails: { videoId: 'videoUNC123', lengthSeconds: '1800', title: 'Uncaptioned Jam', shortDescription: '' },
+    },
+    data: {
+      currentVideoEndpoint: { watchEndpoint: { videoId: 'videoUNC123' } },
+      frameworkUpdates: {
+        entityBatchUpdate: {
+          mutations: [{
+            payload: {
+              macroMarkersListEntity: {
+                markersList: {
+                  heatMarkers: [{ timeRangeStartMillis: 0, markerDurationMillis: 18000, heatMarkerIntensityScoreNormalized: 0.5 }],
+                },
+              },
+            },
+          }],
+        },
+      },
+    },
+  };
+  const win = {
+    location: { origin: 'https://www.youtube.com', search: '?v=videoUNC123' },
+    ytInitialPlayerResponse: null,
+    ytcfg: {
+      get(k) {
+        return ({ INNERTUBE_API_KEY: 'key123', INNERTUBE_CONTEXT: { client: { clientName: 'WEB' } } })[k];
+      },
+    },
+    fetch: async (input) => {
+      const url = typeof input === 'string' ? input : input.href;
+      fetchCalls.push(url);
+      throw new Error('Passive mode must not fetch: ' + url);
+    },
+    XMLHttpRequest: function () {},
+    addEventListener(type, fn) { if (type === 'message') win._onMsg = fn; },
+    postMessage(data) { posted.push(data); },
+  };
+  win.XMLHttpRequest.prototype = { open() {}, send() {}, addEventListener() {} };
+  const ctx = vm.createContext({
+    window: win, location: win.location, fetch: (...a) => win.fetch(...a),
+    document: {
+      cookie: 'SAPISID=fake_sapisid; path=/',
+      getElementById: () => null,
+      querySelector: (sel) => (sel === 'ytd-watch-flexy' ? flexy : null),
+    },
+    URL, URLSearchParams, TextEncoder, crypto: require('node:crypto').webcrypto, console,
+    setTimeout: unrefTimeout, clearTimeout, setInterval: unrefTimeout, clearInterval,
+  });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'topics.js'), 'utf8'), ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'injected.js'), 'utf8'), ctx);
+
+  win._onMsg({ source: win, data: { source: 'yqn', type: 'autocut-data', requestId: 'pas1', videoId: 'videoUNC123', needHeatmap: true, needTranscript: 'passive' } });
+  for (let i = 0; i < 40 && !posted.some((m) => m.type === 'autocut-data' && m.requestId === 'pas1'); i++) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  const reply = posted.find((m) => m.type === 'autocut-data' && m.requestId === 'pas1');
+  assert.ok(reply);
+  assert.equal(reply.payload.heatmap.length, 1);
+  assert.deepEqual(Array.from(reply.payload.transcript), []);
+  assert.deepEqual(fetchCalls, [], 'Passive caption mode must not call /next or /player when heatmap is already in watchFlexy');
+});

@@ -3080,7 +3080,8 @@
       return "The reviewer proposed cuts, but they did not pass verification. Open Auto-Cut for the rejection breakdown.";
     if (i.thorough) return "Review complete — the reviewer kept the available captions. No skip or speed sections were verified.";
     if (i.aiEnabled) {
-      if (i.aiHighlights>0 && i.aiHlPct<10 && !i.aiCut) return "AI returned too little usable coverage for speed-throughs. Re-analyse or use Thorough analysis.";
+      if ((i.aiSparseHighlights || (i.aiHighlights>0 && i.aiHlPct<10)) && !i.aiCut)
+        return "AI returned too little usable coverage for speed-throughs. Re-analyse or use Thorough analysis.";
       return "No cuts verified in the available captions. You can try Thorough analysis or mark a missed sponsor in Video tools.";
     }
     if (i.jevEnabled) return "No confident cuts from Jev in the available captions. You can mark a missed sponsor in Video tools.";
@@ -3672,7 +3673,12 @@
     // 1) SponsorBlock + 2) YouTube page data run concurrently so SponsorBlock
     // network latency never blocks caption/heatmap extraction or AI startup.
     const needHeatmap = !!(configuration.cutBoring || configuration.autoCutPlus);
-    const needTranscript = info.aiEnabled || info.jevEnabled;
+    const needTranscript =
+      info.aiEnabled || info.jevEnabled
+        ? true
+        : needHeatmap && !configuration.thoroughAnalysis
+          ? "passive"
+          : false;
 
     const sbTask = configuration.cutMessaging
       ? (async () => {
@@ -3715,6 +3721,12 @@
     knownDuration = duration;
     info.duration = Math.round(duration);
     acceptNativeTopics(videoId, pageData?.chapters, duration);
+    if (Array.isArray(pageData?.transcript) && pageData.transcript.length) {
+      knownTranscript = pageData.transcript;
+      info.transcriptLines = knownTranscript.length;
+      info.transcriptSrc = "captions";
+      if (current()) transcriptForTools = { videoId, transcript: knownTranscript };
+    }
     if (pageData?.heatmap?.length) {
       peakCache.set(
         videoId,
@@ -3729,10 +3741,26 @@
       return { segments: normalizeSegments(sbSegs.filter((s) => s.sponsor), duration), info };
     }
 
+    const computeHeatmapSegs = () =>
+      pageData?.heatmap?.length
+        ? YqnControls.cutsFromHeatmap(pageData.heatmap, {
+            plus: !!configuration.autoCutPlus,
+            duration,
+            chapters:
+              (nativeTopics?.videoId === videoId && nativeTopics.chapters?.length
+                ? nativeTopics.chapters
+                : info.aiChaptersArr?.length
+                  ? info.aiChaptersArr
+                  : pageData?.chapters) || [],
+            poiHighlights: poiCache.get(videoId) || [],
+            transcript: knownTranscript,
+          })
+        : [];
+
     if ((configuration.cutBoring || configuration.autoCutPlus) && pageData && pageData.heatmap) {
       info.heatmapPoints = pageData.heatmap.length;
       if (pageData.heatmap.length) {
-        heatmapSegs = boringFromHeatmap(pageData.heatmap);
+        heatmapSegs = computeHeatmapSegs();
         if (heatmapSegs.length) publishPartial();
       }
     }
@@ -3824,6 +3852,7 @@
         info.aiCut = result.segments.filter((s) => s.action !== "keep").length;
         info.aiSkips = result.segments.filter((s) => s.action === "skip").length;
         info.thorough = true;
+        if (needHeatmap && pageData?.heatmap?.length) heatmapSegs = computeHeatmapSegs();
         return { segments: finalizeSegments([...sbSegs, ...heatmapSegs, ...result.segments], duration), info };
       }
 
@@ -3895,17 +3924,22 @@
               }
               dlog("[YQN] AI result", ai || info.aiError);
               if (ai) {
-                const aiSegs = segmentsFromAI(ai, duration);
+                const plusMode = !!configuration.autoCutPlus;
+                const offHl = YqnControls.speedOutsideHighlights(ai.highlights, duration, {
+                  plus: plusMode,
+                  skips: ai.skip,
+                });
+                const aiSegs = segmentsFromAI(ai, duration, plusMode);
                 info.aiCut = aiSegs.filter((s) => s.action !== "keep").length;
                 info.aiHighlights = ai.highlights.length;
-                info.aiHlPct = duration
-                  ? Math.round(
-                      (100 / duration) *
-                        ai.highlights.reduce((a, h) => a + Math.max(0, h.end - h.start), 0)
-                    )
-                  : 0;
+                const coveredSec = ai.highlights.reduce((a, h) => a + Math.max(0, h.end - h.start), 0);
+                info.aiHlPct = duration ? Math.round((100 / duration) * coveredSec) : 0;
+                info.aiSparseHighlights =
+                  ai.highlights.length > 0 &&
+                  !offHl.length &&
+                  coveredSec < duration * YqnControls.minHighlightCoverageRatio(duration, plusMode);
                 info.aiSkips = ai.skip.length;
-                info.aiModelUsed = settings.aiModel || "claude-haiku-5-5";
+                info.aiModelUsed = configuration.aiModel || "claude-haiku-5-5";
                 info.aiSummary = ai.summary || "";
                 info.aiChaptersArr = ai.chapters || [];
                 info.aiTakeawaysArr = ai.takeaways || [];
@@ -3925,6 +3959,7 @@
       await sbTask;
     }
     if (!current()) return null;
+    if (needHeatmap && pageData?.heatmap?.length) heatmapSegs = computeHeatmapSegs();
 
     dlog(
       `[YQN] SUMMARY sb=${info.sbCount} heat=${info.heatmapPoints} ` +
@@ -4113,6 +4148,15 @@
     return { card, thumbHost, vid };
   }
 
+  function isFreshPlanHit(hit, now = Date.now()) {
+    return !!(
+      hit &&
+      Array.isArray(hit.segments) &&
+      now - hit.ts < CUT_CACHE_TTL &&
+      (!hit.settingsKey || String(hit.settingsKey).startsWith('["v2",'))
+    );
+  }
+
   async function resolveThumbBadgeData(vid) {
     const now = Date.now();
     const cached = thumbBadgeCache.get(vid);
@@ -4120,7 +4164,7 @@
     let data = null;
     const planCache = await ensureCachedThumbPlans();
     const hit = planCache?.[vid];
-    if (hit && Array.isArray(hit.segments) && now - hit.ts < CUT_CACHE_TTL) {
+    if (isFreshPlanHit(hit, now)) {
       data = {
         segments: hit.segments,
         poiHighlights: hit.info?.poiHighlights || poiCache.get(vid) || [],
@@ -4192,7 +4236,7 @@
       if (!target || seenHosts.has(target.thumbHost)) continue;
       seenHosts.add(target.thumbHost);
       const hit = cache[target.vid];
-      if (!hit || !Array.isArray(hit.segments) || now - hit.ts >= CUT_CACHE_TTL) continue;
+      if (!isFreshPlanHit(hit, now)) continue;
       const existing = target.thumbHost.querySelector?.(".yqn-thumb-badge");
       if (existing && existing.dataset?.vid === target.vid && existing.dataset?.prepared === "1") {
         if (existing.dataset?.hasDur === "1") continue;
@@ -4295,92 +4339,6 @@
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 
-  /* ----- Most replayed -> tiered trim. -----
-   * A marker is "dull" when it dips well below its LOCAL neighbourhood, not
-   * below a fraction of the video's single hottest spike. Comparing against a
-   * rolling median makes decisions consistent across videos: one viral moment
-   * no longer drags everything else under the threshold, a flat heatmap cuts
-   * nothing, and a naturally decaying heatmap only cuts genuine local dips.
-   * Scores are smoothed first so single noisy markers can't flip a tier.
-   * Plus mode raises the bar so much more of the video qualifies.
-   */
-  function boringFromHeatmap(heatmap) {
-    // heatmap: [{start, end, score(0..1)}] — typically ~100 markers.
-    const n = heatmap.length;
-    if (!n) return [];
-    const plus = !!settings.autoCutPlus;
-    const minSkip = plus ? 4 : 6;
-    const minSpeed = plus ? 3 : 5;
-    const speedK = plus ? 1.0 : 0.8; // below this × baseline -> speed
-    const skipK = plus ? 0.5 : 0.35; // below this × baseline -> dead zone -> skip
-
-    // 1) Smooth single-marker noise (3-wide moving average).
-    const raw = heatmap.map((h) => h.score || 0);
-    const sm = raw.map((_, i) => {
-      let sum = 0;
-      let c = 0;
-      for (let j = Math.max(0, i - 1); j <= Math.min(n - 1, i + 1); j++) {
-        sum += raw[j];
-        c++;
-      }
-      return sum / c;
-    });
-
-    // 2) Baseline per marker: rolling local median (±10% of the video),
-    //    capped at 1.5× the global median so an extremely hot neighbourhood
-    //    doesn't set an unfairly high bar for its own edges.
-    const median = (arr) => {
-      const a = [...arr].sort((x, y) => x - y);
-      const m = a.length >> 1;
-      return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
-    };
-    const glob = Math.max(median(sm), 0.0001);
-    const W = Math.max(5, Math.round(n * 0.1));
-    const baseAt = (i) => {
-      const lo = Math.max(0, i - W);
-      const hi = Math.min(n - 1, i + W);
-      return Math.min(Math.max(median(sm.slice(lo, hi + 1)), 0.0001), glob * 1.5);
-    };
-
-    const tier = (i) => {
-      const b = baseAt(i);
-      if (sm[i] < skipK * b) return 2; // skip
-      if (sm[i] < speedK * b) return 1; // speed
-      return 0; // keep
-    };
-
-    const out = [];
-    let cur = null;
-    for (let i = 0; i < n; i++) {
-      const t = tier(i);
-      if (t === 0) {
-        if (cur) {
-          out.push(cur);
-          cur = null;
-        }
-        continue;
-      }
-      if (cur && cur._tier === t) {
-        cur.end = heatmap[i].end;
-      } else {
-        if (cur) out.push(cur);
-        cur = {
-          start: heatmap[i].start,
-          end: heatmap[i].end,
-          action: t === 2 ? "skip" : "speed",
-          reason: t === 2 ? "dead zone" : "low replays",
-          _tier: t,
-        };
-      }
-    }
-    if (cur) out.push(cur);
-
-    // Min lengths so we don't stutter: skips a touch longer than speed-ups.
-    return out
-      .filter((s) => (s.action === "skip" ? s.end - s.start >= minSkip : s.end - s.start >= minSpeed))
-      .map((s) => ({ start: s.start, end: s.end, action: s.action, reason: s.reason }));
-  }
-
   // ----- AI highlights (Claude): returns { highlights, skip } -----
 
   // JSON schema for structured outputs — guarantees the response parses.
@@ -4479,19 +4437,23 @@
       "each item its own chapter, even in lists of 15 or more items. " +
       "summary = 2-3 plain sentences on what the video actually covers and " +
       "its main takeaways - concrete, no fluff, no 'this video...' framing. " +
-      "highlights = the genuinely interesting/substantive moments worth " +
-      "watching at normal speed. Merge adjacent substantive stretches separated " +
-      "by under 5s into one {start,end} block rather than splitting every sentence. " +
-      "There is no target percentage to remove; " +
-      "a dense tutorial can all be worth keeping. Preserve demonstrations, " +
-      "prerequisite explanations and useful examples. Cover " +
-      "the WHOLE video from 0s to the end - later parts matter as much as " +
-      "the opening. Be selective: everything you leave out of highlights " +
-      "will be fast-forwarded, and that is the point - do not mark a stretch " +
-      "as a highlight unless it truly earns normal speed. " +
+      "highlights = every substantive section worth watching at normal speed " +
+      "(explanations, arguments, demonstrations, benchmarks, useful examples " +
+      "and conclusions). Merge adjacent substantive stretches separated by " +
+      "under 5s into one {start,end} block rather than splitting every sentence. " +
+      "There is no target percentage to remove; a dense tutorial or talk can " +
+      "almost all be worth keeping. Cover the WHOLE video evenly from 0s to " +
+      "the end — middle and late chapters matter just as much as the opening, " +
+      "so never treat highlights as a sparse trailer or drop coverage in the " +
+      "second half of a long video. Everything left outside highlights (and " +
+      "not in skip) will be fast-forwarded: leave out only genuine repetition, " +
+      "slow rambling, filler transitions or chit-chat, never multi-minute " +
+      "substantive topics. " +
       (plusAI
-        ? "Be ruthless: keep only the clearly best moments, and when a " +
-          "stretch is uncertain, keep it. Speed up clear repetition. "
+        ? "Quick watch mode: leave verbose setup, repeated examples and slow " +
+          "recaps outside highlights so they play faster, while still keeping " +
+          "every distinct substantive point, demo and conclusion in highlights. " +
+          "When uncertain, keep it. "
         : "") +
       "skip = parts to cut entirely: sponsor reads, subscribe/like/bell " +
       "reminders, intros, outros, dead air, long off-topic tangents or " +
@@ -4617,51 +4579,25 @@
     return out;
   }
 
-  // Turn the AI result into cut segments: skip the junk, speed the gaps
-  // between highlights. (normalizeSegments gives skip precedence on overlap.)
-  function segmentsFromAI(ai, duration) {
+  // Turn the AI result into cut segments: skip the junk, speed the bounded
+  // filler gaps between highlights. (normalizeSegments gives skip precedence.)
+  function segmentsFromAI(ai, duration, plus = !!settings.autoCutPlus) {
     const segs = ai.skip.map((s) => ({
       start: s.start,
       end: s.end,
       action: "skip",
       reason: s.reason ? "AI: " + s.reason : "AI cut",
     }));
-    segs.push(...speedOutsideHighlights(ai.highlights, duration));
+    segs.push(...speedOutsideHighlights(ai.highlights, duration, { plus, skips: ai.skip }));
     segs.push(...ai.highlights.map(s=>({...s,action:"keep",reason:"AI: substantive content",protect:true,source:"ai"})));
     return segs;
   }
 
-  // Speed through everything outside the AI's highlights.
-  function speedOutsideHighlights(highlights, duration) {
-    if (!duration) return [];
-    const MIN_GAP = 5; // shorter dull stretches aren't worth the rate flicker
-    const keep = [];
-    for (const h of highlights.map(h => ({start: Math.max(0, +h.start), end: Math.min(duration, +h.end)}))
-      .filter(h => Number.isFinite(h.start) && Number.isFinite(h.end) && h.end > h.start)
-      .sort((a,b) => a.start-b.start)) {
-      const last = keep[keep.length-1];
-      if (last && h.start <= last.end) last.end = Math.max(last.end,h.end);
-      else keep.push(h);
-    }
-    // Highlights covering almost none of the runtime mean the model's
-    // highlight channel failed, not that the whole video is junk — speeding
-    // "everything outside" would fast-forward the entire video. Skips still
-    // apply, and the other enabled sources keep providing
-    // speed-throughs.
-    const covered = keep.reduce((a, h) => a + Math.max(0, h.end - h.start), 0);
-    if (covered < duration * 0.1) return [];
-    const gaps = [];
-    let cursor = 0;
-    for (const h of keep) {
-      if (h.start - cursor >= MIN_GAP) {
-        gaps.push({ start: cursor, end: h.start, action: "speed", reason: "off-highlight" });
-      }
-      cursor = Math.max(cursor, h.end);
-    }
-    if (duration - cursor >= MIN_GAP) {
-      gaps.push({ start: cursor, end: duration, action: "speed", reason: "off-highlight" });
-    }
-    return gaps;
+  function speedOutsideHighlights(highlights, duration, opts = {}) {
+    return YqnControls.speedOutsideHighlights(highlights, duration, {
+      plus: !!settings.autoCutPlus,
+      ...opts,
+    });
   }
 
   /* ----- Jev fast cuts (TypeSafe System One model). -----
@@ -4730,7 +4666,13 @@
       }
     }
     wins.forEach((w, i) => {
-      w.end = i + 1 < wins.length ? wins[i + 1].start : videoEnd;
+      const lastLine = w.lines[w.lines.length - 1];
+      const lastLineEnd = Math.max(
+        lastLine.start + Math.min(12, Math.max(3, +lastLine.duration || 8)),
+        Number.isFinite(+lastLine.end) ? +lastLine.end : 0
+      );
+      const nextBound = i + 1 < wins.length ? wins[i + 1].start : videoEnd;
+      w.end = nextBound - lastLineEnd > 15 ? Math.min(nextBound, lastLineEnd + 2) : nextBound;
     });
     return wins;
   }

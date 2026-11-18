@@ -147,7 +147,7 @@
     'Kinds: sponsor, intro, outro, demonstration, explanation, repetition, tangent, other. ' +
     'Make a pacing pass as well as a sponsor pass. Keep key facts, first explanations of new ideas, essential instructions, important visual demonstrations, results and conclusions at normal speed. ' +
     'There is NO target amount to remove: an entire dense tutorial can be keep. A caption gap is not silence or evidence of low value. ' +
-    'Speed means watch the passage faster, not remove it. Use speed for recaps, repeated explanations or examples, conversational padding, wordy transitions and off-topic asides whose gist remains useful. Content can be useful without requiring normal speed; do not restrict speed to literal repeated wording. ' +
+    'Speed means watch the passage faster, not remove it. Use speed for recaps, repeated explanations or examples, conversational padding, wordy transitions and off-topic asides whose gist remains useful. Content can be useful without requiring normal speed; do not restrict speed to literal repeated wording. Never blanket-mark an entire multi-minute topic or whole core as speed; keep each speed span focused on the specific repetitive, transitional or routine lines and return to keep as soon as new claims, numbers, conclusions or topic shifts appear. ' +
     (pacing==='quick'
       ? 'QUICK WATCH pacing: also speed through narrated routine setup, familiar intermediate steps and extended demonstrations after their key mechanism is established. Split around new facts, critical settings, warnings, first demonstrations and results so those stay normal. Use captions as evidence; do not guess what unseen visuals contain. '
       : 'BALANCED pacing: speed through the low-information passages above while keeping the first useful explanation or demonstration of each topic at normal speed. ') +
@@ -174,7 +174,7 @@
     return out;
   }
 
-  async function run({transcript,duration,description='',title='',pacing='balanced',request,current=()=>true,onProgress=()=>{},playhead=null,maxChunks=60,concurrency=1}) {
+  async function run({transcript,duration,description='',title='',pacing='balanced',request,current=()=>true,onProgress=()=>{},playhead=null,maxChunks=90,concurrency=1}) {
     pacing=pacing==='quick'?'quick':'balanced';
     const lines=prepare(transcript,duration),chunks=chunksFor(lines);
     const state={total:chunks.length,done:0,checked:0,lines:lines.length,rejected:0,recoveries:0,requests:0,audit:newAudit(),errors:[],failures:[],segments:[],summaries:[],takeaways:[],chapters:[],mentions:[]};

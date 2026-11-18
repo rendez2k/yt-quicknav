@@ -7,6 +7,7 @@ const {
   computeRemainingWatchTime, formatRemainingClock, advanceAbLoop, parseShortsPath, buildFrameFilename,
   recordLifetimeSavings, summarizeLifetimeSavings,
   coalesceMicroGaps, annotateSpeechDensity, resolveSpeedRate,
+  minHighlightCoverageRatio, speedOutsideHighlights, cutsFromHeatmap,
   effectiveSpeedEnd, nextBoundaryDelayMs, isTimeBuffered,
   shouldBurstShortSkip, formatSkipToast, tldrReelBudget, buildTldrDigest, formatTldrMarkdown,
   SavingsTracker, SilenceDetector,
@@ -515,4 +516,100 @@ test('v1.44: long-video Highlight Reel scales across chapters, includes setup le
     assert.ok(d.highlights.every(c=>c.end<=600||c.start>=690),'No highlight clip overlaps sponsor segment');
   }
   assert.ok(tldrReelBudget(3600,'deep').targetSec > tldrReelBudget(3600,'balanced').targetSec);
+});
+
+test('v1.46: cutsFromHeatmap avoids runaway long-video speed-throughs, despikes chapter clicks, and protects spoken verdicts',()=>{
+  // 1) Flat/steady lecture in Quick watch (plus: true) must NOT speed through ~50% of the video.
+  const flatLecture=Array.from({length:100},(_,i)=>({
+    start:i*36,end:(i+1)*36,score:0.40+(i%3===0?0.02:i%3===1?-0.02:0),
+  }));
+  assert.deepEqual(cutsFromHeatmap(flatLecture,{plus:true,duration:3600}),[],'Steady lecture should have 0 heatmap cuts even in Quick watch');
+
+  // 2) 60m video (100x36s buckets) with chapter-click spikes (0.95), a single-bucket glitch,
+  //    a 10-minute non-viral chapter plateau (0.10), and one genuine 2-bucket (72s) scrub valley.
+  const chapters=[
+    {start:0,title:'Intro'},
+    {start:360,title:'Architecture overview'},
+    {start:1440,title:'Deep dive into consensus'},
+    {start:2520,title:'Final benchmarks'},
+  ];
+  const transcript=[];
+  for (let t=0;t<3600;t+=6) {
+    // Inside the 10-minute plateau (1440..2052s), put a 24s silent B-roll pocket at 1620..1644s;
+    // everywhere else is substantive spoken explanation.
+    if (t>=1620 && t<1644) continue;
+    if (t===918) {
+      transcript.push({start:918,end:926,text:'In conclusion, tail latency dropped by 42% compared to baseline in our benchmark.'});
+      continue;
+    }
+    transcript.push({start:t,end:t+5.5,text:'We trace how replica state machines commit log entries deterministically across zones.'});
+  }
+  const longHeatmap=Array.from({length:100},(_,i)=>{
+    const start=i*36,end=(i+1)*36;
+    let score=0.36;
+    if ([10,40,70].includes(i)) score=0.95; // chapter-click spikes at 360s, 1440s, 2520s
+    else if (i===20) score=0.08; // isolated 1-bucket (36s) dip -> must be ignored on 60m video
+    else if (i>=25 && i<=26) score=0.04; // genuine 2-bucket (900..972s = 72s) valley with active speech + verdict at 918s
+    else if (i>=41 && i<=56) score=0.10; // 16-bucket (~10m) non-viral chapter plateau
+    return {start,end,score};
+  });
+
+  const cuts=cutsFromHeatmap(longHeatmap,{
+    plus:true,
+    duration:3600,
+    chapters,
+    poiHighlights:[955],
+    transcript,
+  });
+
+  // Chapter-click spike at 360s must NOT cause 396..600s normal discussion to be sped through.
+  assert.equal(cuts.some(s=>s.start>=360 && s.end<=650),false,'Post-chapter normal discussion must not be sped through');
+  // Single-bucket 36s noise dip at 720..756s must be ignored on a 60m video.
+  assert.equal(cuts.some(s=>s.end>720 && s.start<756),false,'Single 36s noisy bucket must not trigger a cut on a 60m video');
+  // 10-minute non-viral plateau (1476..2052s) must NOT become a 10-minute speed-through; only the 24s silent pocket is trimmed!
+  assert.equal(cuts.every(s=>s.end-s.start<=135),true,'No heatmap speed-through may span multiple minutes');
+  assert.ok(cuts.some(s=>s.start>=1618 && s.end<=1650 && s.action==='speed'),'Silent pocket inside long plateau is selectively trimmed');
+  assert.equal(cuts.some(s=>s.start<1580 && s.end>1700),false,'Substantive spoken body of non-viral chapter stays at 1x');
+  // Active speech inside the deep 900..972s valley demotes dead-zone skip -> speed, and carves out both the 918s verdict and 955s POI!
+  assert.equal(cuts.some(s=>s.action==='skip'),false,'Active speech must never be teleport-skipped from heatmap data alone');
+  assert.ok(cuts.some(s=>s.start>=900 && s.end<=918 && s.action==='speed'),'Genuinely low-replay valley is sped before verdict');
+  assert.equal(cuts.some(s=>s.start<922 && s.end>922),false,'High-signal benchmark conclusion at 918..926s is protected at 1x');
+  assert.equal(cuts.some(s=>s.start<955 && s.end>955),false,'SponsorBlock POI highlight at 955s is protected at 1x');
+});
+
+test('v1.46: speedOutsideHighlights blocks sparse long-video coverage and multi-minute unhighlighted gaps, and annotateSpeechDensity respects endMs',()=>{
+  // 1) Sparse 15% highlight coverage on a 60m video is rejected (needs >= 30% normal / >= 22% quick).
+  assert.ok(minHighlightCoverageRatio(3600,false)>=0.30);
+  const sparse60m=[{start:0,end:180},{start:1200,end:1380},{start:2400,end:2580}]; // 540s = 15%
+  assert.deepEqual(speedOutsideHighlights(sparse60m,3600,{plus:false}),[]);
+
+  // 2) Healthy 45m (2700s) coverage with:
+  //    - a bounded 60s filler gap (300..360s) -> sped
+  //    - a 180s gap (600..780s) containing a 150s sponsor skip (600..750s) + 30s lead-out -> 30s sped
+  //    - a 10-minute unhighlighted middle section (1100..1700s) -> KEPT (not sped for 10m!)
+  //    - a 5-minute unhighlighted ending (2400..2700s) -> KEPT (not sped for 5m!)
+  const hl45m=[
+    {start:0,end:300},
+    {start:360,end:600},
+    {start:780,end:1100},
+    {start:1700,end:2400},
+  ]; // 1560s = 57.8% coverage
+  const gaps=speedOutsideHighlights(hl45m,2700,{
+    plus:false,
+    skips:[{start:600,end:750,reason:'sponsor'}],
+  });
+  assert.deepEqual(gaps,[
+    {start:300,end:360,action:'speed',reason:'off-highlight'},
+    {start:750,end:780,action:'speed',reason:'off-highlight'},
+  ]);
+
+  // 3) annotateSpeechDensity computes accurate WPM when transcript cues use {start, end} (get_transcript format) without duration.
+  const rapidCues=Array.from({length:6},(_,i)=>({
+    start:100+i*5,
+    end:100+(i+1)*5,
+    text:'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen',
+  })); // 18 words / 5s = 216 WPM
+  const annotated=annotateSpeechDensity([{start:100,end:130,action:'speed',reason:'low replays'}],rapidCues);
+  assert.ok(annotated[0].wpm>=205,`Expected >=205 WPM from {start,end} cues, got ${annotated[0].wpm}`);
+  assert.ok(resolveSpeedRate(3,annotated[0],1)<=2.25,'Rapid 216-WPM speaker tempered from 3x down to <=2.25x');
 });
