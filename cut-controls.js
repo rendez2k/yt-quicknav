@@ -1739,7 +1739,9 @@
         // Never teleport-skip active spoken content from heatmap data alone.
         if (effTier === 2) {
           if (totalSpan >= 900 && clean[i].end - clean[i].start > 45) effTier = 1;
-          else if (lines.length && maxCaptionEnd > clean[i].start + 2) {
+          else if (!lines.length || maxCaptionEnd <= clean[i].start + 2) {
+            if (vDur > 20) effTier = 1;
+          } else {
             const st = speechStats(clean[i].start, clean[i].end);
             if (st.wpm >= 35 && st.fluffSec < (clean[i].end - clean[i].start) * 0.5) effTier = 1;
           }

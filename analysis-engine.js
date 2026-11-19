@@ -147,7 +147,7 @@
     'Kinds: sponsor, intro, outro, demonstration, explanation, repetition, tangent, other. ' +
     'Make a pacing pass as well as a sponsor pass. Keep key facts, first explanations of new ideas, essential instructions, important visual demonstrations, results and conclusions at normal speed. ' +
     'There is NO target amount to remove: an entire dense tutorial can be keep. A caption gap is not silence or evidence of low value. ' +
-    'Speed means watch the passage faster, not remove it. Use speed for recaps, repeated explanations or examples, conversational padding, wordy transitions and off-topic asides whose gist remains useful. Content can be useful without requiring normal speed; do not restrict speed to literal repeated wording. Never blanket-mark an entire multi-minute topic or whole core as speed; keep each speed span focused on the specific repetitive, transitional or routine lines and return to keep as soon as new claims, numbers, conclusions or topic shifts appear. ' +
+    'Speed means watch the passage faster, not remove it. Actively mark speed on recaps, repeated explanations or examples, rhetorical build-up, conversational padding, wordy transitions, subjective rambling and off-topic asides whose gist remains useful — most conversational or commentary videos have several 10s–90s passages that benefit from faster playback. Content can be useful without requiring normal speed; do not restrict speed to literal repeated wording, and do not blanket-mark an entire multi-minute topic as speed when new claims, numbers, demonstrations or conclusions appear inside it. ' +
     (pacing==='quick'
       ? 'QUICK WATCH pacing: also speed through narrated routine setup, familiar intermediate steps and extended demonstrations after their key mechanism is established. Split around new facts, critical settings, warnings, first demonstrations and results so those stay normal. Use captions as evidence; do not guess what unseen visuals contain. '
       : 'BALANCED pacing: speed through the low-information passages above while keeping the first useful explanation or demonstration of each topic at normal speed. ') +
@@ -248,9 +248,12 @@
           queue.unshift(...splitChunk(chunk).map((c,i)=>({...c,label:chunk.label+(i?'b':'a')})));state.total++;state.recoveries++;
           emit('Response too long — retrying smaller sections');continue;
         }
-        state.errors.push(`Section ${chunk.label}: ${error.message || 'request failed'}`);
+        const errMsg = error.message || 'request failed';
+        const isBudget = /budget/i.test(errMsg);
+        state.errors.push(`Section ${chunk.label}: ${errMsg}`);
         state.failures.push({start:lines[chunk.first].start,end:lines[chunk.last].end,phase,
-          code:error.code==='YQN_OUTPUT_LIMIT'?'response_limit':/budget/i.test(error.message || '')?'budget':'request_failed'});
+          code:error.code==='YQN_OUTPUT_LIMIT'?'response_limit':isBudget?'budget':'request_failed'});
+        if (isBudget || /HTTP (?:401|403)\b|credit balance/i.test(errMsg)) queue.length = 0;
       } finally {
         reserved-=remaining;
       }

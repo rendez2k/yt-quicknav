@@ -1,5 +1,10 @@
 # YouTube Quick Nav + Cinema
 
+## Top-of-panel incomplete diagnostics, pre-roll ad auto-recovery, 429 backoff & fallback speed-ups — 1.46.2 (19 November 2026)
+
+- **Top-of-panel incomplete banner + 1-click `↻ Re-analyse` & `⚡ Switch to Quick watch`:** Surfaces the exact reason an analysis is incomplete right at the top of `#yqn-cut-panel` (instead of buried below `Topics`), extracts descriptive Anthropic API error messages, and adds a 1-click `⚡ Switch to Quick watch` action when a video has `0` speed-ups in `Custom` (`Balanced`) mode.
+- **Preserves free speed-throughs when Thorough AI fails + automatic pre-roll ad recovery:** Prevents a failed `0`-line Thorough run from wiping out `Most Replayed` and SponsorBlock `filler` speed-ups, automatically retries caption/AI analysis as soon as a YouTube pre-roll ad finishes, backs off on `429`/`529` rate limits (common when Watch Later preparation runs concurrently), and falls back from retired `claude-sonnet-5` (`404`) to `claude-sonnet-5-5`.
+
 ## Automatic viewport estimated-runtime badges (`→ mm:ss` without hovering) & Watch Later update refresh — 1.46.1 (19 November 2026)
 
 - **Automatic estimated shorter times on visible Watch Later, playlist & feed thumbnails (no hover required):** Visible thumbnails in Watch Later, playlists, Home, Subscriptions, Search, and Watch sidebars now automatically resolve SponsorBlock runtime estimates (`→ 9:06`) through a polite bounded viewport queue (`3` concurrent hash-prefix requests) — no need to mouse over every row individually.
@@ -638,7 +643,7 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 
 ## Packaging for a friend (no keys shared)
 
-Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.46.1.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
+Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.46.2.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
 
 ## Development checks
 

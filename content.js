@@ -2207,6 +2207,18 @@
         const note=document.createElement("div");note.className="yqn-cp-msg";
         note.textContent=settings.cutPreset==="sponsors" ? "Sponsors only keeps other sections at normal speed. Choose Gentle trim or Quick watch to enable speed-ups." :
           "No speed-up sections in this result. Quick watch asks for faster pacing through routine detail; Topics lets you jump past a whole section.";
+        if (settings.cutPreset !== "quick" && !settings.autoCutPlus) {
+          const quickBtn = document.createElement("button");
+          quickBtn.type = "button";
+          quickBtn.className = "yqn-cp-inline-action";
+          quickBtn.textContent = "⚡ Switch to Quick watch";
+          quickBtn.addEventListener("click", () => {
+            void changeCutPreference(YqnControls.presetPatch("quick"));
+          });
+          const btnWrap = document.createElement("div");
+          btnWrap.appendChild(quickBtn);
+          note.appendChild(btnWrap);
+        }
         body.appendChild(note);
       }
 
@@ -2280,13 +2292,18 @@
       appendAIExtras(body);
     }
 
+    let topAlert = null;
     if (settings.autoCut && !cutIgnored) {
-      const status = document.createElement("div");
-      status.className = "yqn-cp-msg";
-      status.textContent = cutPlanningFor === vid && havePlan
+      const inProgressText = cutPlanningFor === vid && havePlan
         ? (lastPlanInfo?.analysisProgress || "Analysis in progress. Checking the remaining sources…")
-        : planWarnings(lastPlanInfo);
-      if (status.textContent) body.appendChild(status);
+        : "";
+      const warningText = !inProgressText ? planWarnings(lastPlanInfo) : "";
+      if (inProgressText) {
+        const status = document.createElement("div");
+        status.className = "yqn-cp-msg";
+        status.textContent = inProgressText;
+        body.appendChild(status);
+      }
       if (lastPlanInfo?.thoroughCoverage) {
         const coverage=document.createElement("div");coverage.className="yqn-cp-coverage";
         coverage.textContent=lastPlanInfo.thoroughCoverage;body.appendChild(coverage);
@@ -2309,11 +2326,21 @@
       const wrap = document.createElement("div");
       wrap.className = "yqn-cp-retry-wrap";
       wrap.appendChild(retry);
-      body.appendChild(wrap);
+      if (warningText) {
+        topAlert = document.createElement("div");
+        topAlert.className = "yqn-cp-alert";
+        const alertText = document.createElement("div");
+        alertText.className = "yqn-cp-alert-text";
+        alertText.textContent = warningText;
+        topAlert.append(alertText, wrap);
+      } else {
+        body.appendChild(wrap);
+      }
     }
     const preferences = document.createElement("div");
     appendCutPreferences(preferences);
     body.prepend(preferences);
+    if (topAlert) body.prepend(topAlert);
     const focusKey = document.activeElement?.dataset?.focusKey;
     const scrollTop = panel.scrollTop;
     panel.innerHTML = "";
@@ -3467,6 +3494,7 @@
     const scrollTimers = [];
     const pinScroll = () => {
       const el = document.scrollingElement || document.documentElement;
+      if (!el) return;
       const y = el.scrollTop;
       const restore = () => {
         if (!current()) return;
@@ -3614,6 +3642,80 @@
     }
   }
 
+  async function extractClaudeHttpError(res) {
+    let detail = "";
+    try {
+      const body = await (typeof res.clone === "function" ? res.clone() : res).json();
+      const raw = body?.error?.message || body?.message || "";
+      if (typeof raw === "string" && raw.trim()) {
+        detail = raw
+          .replace(/\bsk-ant-[A-Za-z0-9_-]+/g, "[redacted]")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 110);
+      }
+    } catch {}
+    return detail ? `Claude HTTP ${res.status} (${detail})` : `Claude HTTP ${res.status}`;
+  }
+
+  async function sleepAbortable(ms, signal, current = () => true) {
+    if (ms <= 0 || !current() || signal?.aborted) return;
+    await new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(t);
+        signal?.removeEventListener?.("abort", done);
+        resolve();
+      };
+      const t = setTimeout(done, ms);
+      signal?.addEventListener?.("abort", done, { once: true });
+    });
+  }
+
+  async function postClaudeWithRetry({ apiKey, model, maxTokens, system, schema, messages, videoId, signal, current = () => true }) {
+    let activeModel = model || "claude-haiku-5-5";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!current()) throw new Error("Analysis cancelled");
+      const reqSignal = AbortSignal.any([AbortSignal.timeout(90000), ...(signal ? [signal] : [])]);
+      const res = await YqnAI.request(
+        "https://api.anthropic.com/v1/messages",
+        {
+          method: "POST",
+          signal: reqSignal,
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "anthropic-dangerous-direct-browser-access": "true",
+          },
+          body: JSON.stringify({
+            model: activeModel,
+            max_tokens: maxTokens,
+            system,
+            output_config: { format: { type: "json_schema", schema } },
+            messages,
+          }),
+        },
+        videoId
+      );
+      if (res.ok) return { res, modelUsed: activeModel };
+      if (res.status === 404 && activeModel === "claude-sonnet-5") {
+        activeModel = "claude-sonnet-5-5";
+        continue;
+      }
+      if ((res.status === 429 || res.status === 529) && attempt < 2 && current() && !signal?.aborted) {
+        const retryHeader = Number(res.headers?.get?.("retry-after"));
+        const waitMs = Number.isFinite(retryHeader) && retryHeader > 0
+          ? Math.min(10000, Math.max(1200, retryHeader * 1000))
+          : attempt === 0 ? 2200 : 5000;
+        await sleepAbortable(waitMs, signal, current);
+        if (!current() || signal?.aborted) throw new Error("Analysis cancelled");
+        continue;
+      }
+      throw new Error(await extractClaudeHttpError(res));
+    }
+    throw new Error("Claude request failed after retries");
+  }
+
   async function buildCutPlan(videoId, current = () => true, progress = () => {}) {
     let sbSegs = [];
     let heatmapSegs = [];
@@ -3698,11 +3800,13 @@
         })()
       : Promise.resolve();
 
+    if (isAdPlaying()) info.sawAd = true;
     const pageTask = needHeatmap || needTranscript
       ? requestAutocutData(videoId, needHeatmap, needTranscript)
       : Promise.resolve(null);
 
     const pageData = await pageTask;
+    if (isAdPlaying()) info.sawAd = true;
     if (needHeatmap || needTranscript) {
       info.diag = pageData && pageData.diag;
       info.pageError = !pageData || !!pageData.error;
@@ -3773,6 +3877,7 @@
       if (!transcript.length) {
         transcript = await getTranscriptFromPanel(current);
         if (transcript.length) info.transcriptSrc = "panel";
+        if (isAdPlaying()) info.sawAd = true;
       }
       info.transcriptLines = transcript.length;
       knownTranscript = transcript;
@@ -3781,6 +3886,7 @@
 
       if (configuration.thoroughAnalysis && info.aiEnabled) {
         thoroughActive = true;
+        let activeThoroughModel = configuration.aiModel;
         const result = await YqnAnalysis.run({
           transcript,
           duration,
@@ -3792,28 +3898,18 @@
           concurrency: globalThis.YqnPreparation?.role ? 1 : 2,
           request: async ({ system, input, schema }) => {
             if (!current()) throw new Error("Analysis cancelled");
-            const res = await YqnAI.request(
-              "https://api.anthropic.com/v1/messages",
-              {
-                method: "POST",
-                signal: AbortSignal.any([AbortSignal.timeout(90000), ...(signal ? [signal] : [])]),
-                headers: {
-                  "content-type": "application/json",
-                  "x-api-key": configuration.anthropicKey,
-                  "anthropic-version": "2023-06-01",
-                  "anthropic-dangerous-direct-browser-access": "true",
-                },
-                body: JSON.stringify({
-                  model: configuration.aiModel,
-                  max_tokens: 8192,
-                  system,
-                  output_config: { format: { type: "json_schema", schema } },
-                  messages: [{ role: "user", content: JSON.stringify(input) }],
-                }),
-              },
-              videoId
-            );
-            if (!res.ok) throw new Error("Claude HTTP " + res.status);
+            const { res, modelUsed } = await postClaudeWithRetry({
+              apiKey: configuration.anthropicKey,
+              model: activeThoroughModel,
+              maxTokens: 8192,
+              system,
+              schema,
+              messages: [{ role: "user", content: JSON.stringify(input) }],
+              videoId,
+              signal,
+              current,
+            });
+            activeThoroughModel = modelUsed;
             const response = await res.json();
             if (response.stop_reason === "max_tokens")
               throw Object.assign(new Error("Claude response reached its length limit (max_tokens)"), { code: "YQN_OUTPUT_LIMIT" });
@@ -3844,7 +3940,7 @@
           (result.rejected ? ` · ${result.rejected} uncertain caption decisions kept` : "") +
           ". Visual-only gaps stay unchanged.";
         if (!result.complete) info.thoroughError = result.errors.join(" ") || "Unverified sections kept";
-        info.aiModelUsed = configuration.aiModel;
+        info.aiModelUsed = result.checked > 0 ? activeThoroughModel : null;
         info.aiSummary = result.summaries.length ? "Verified section notes: " + YqnAnalysis.sampleAcross(result.summaries, 4).join(" ").slice(0, 900) : "";
         info.aiTakeawaysArr = YqnAnalysis.sampleAcross([...new Set(result.takeaways)], 8);
         info.aiChaptersArr = YqnTopics.clean(result.chapters, duration);
@@ -3853,7 +3949,8 @@
         info.aiSkips = result.segments.filter((s) => s.action === "skip").length;
         info.thorough = true;
         if (needHeatmap && pageData?.heatmap?.length) heatmapSegs = computeHeatmapSegs();
-        return { segments: finalizeSegments([...sbSegs, ...heatmapSegs, ...result.segments], duration), info };
+        const thoroughSegs = result.checked > 0 ? result.segments : [];
+        return { segments: finalizeSegments([...sbSegs, ...heatmapSegs, ...thoroughSegs], duration), info };
       }
 
       dlog(`[YQN] transcript ${transcript.length} lines (${info.transcriptSrc || "-"})`);
@@ -4637,24 +4734,16 @@
 
     // Keep long Claude requests in the tab: MV3 workers can terminate while
     // waiting more than 30s for fetch headers. Claude supports browser CORS.
-    const res = await YqnAI.request("https://api.anthropic.com/v1/messages", {
-      signal: AbortSignal.any([AbortSignal.timeout(90000), ...(analysisAbort ? [analysisAbort.signal] : [])]),
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": settings.anthropicKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: settings.aiModel || "claude-haiku-5-5",
-        max_tokens: 8000,
-        system: sys,
-        output_config: { format: { type: "json_schema", schema: AI_CUT_SCHEMA } },
-        messages: [{ role: "user", content: user }],
-      }),
-    }, getVideoId());
-    if (!res.ok) throw new Error("Claude HTTP " + res.status);
+    const { res } = await postClaudeWithRetry({
+      apiKey: settings.anthropicKey,
+      model: settings.aiModel || "claude-haiku-5-5",
+      maxTokens: 8000,
+      system: sys,
+      schema: AI_CUT_SCHEMA,
+      messages: [{ role: "user", content: user }],
+      videoId: getVideoId(),
+      signal: analysisAbort ? analysisAbort.signal : undefined,
+    });
     const data = await res.json();
     if (["max_tokens", "refusal"].includes(data.stop_reason)) throw new Error("Claude response incomplete (" + data.stop_reason + ")");
     const text = (data.content || []).map((c) => c.text || "").join("");
@@ -5355,16 +5444,37 @@
     }
   }
 
+  let wasAdPlaying = false;
+  let adRetriedForVideo = null;
+
   function onCutTick(e) {
     if(globalThis.YqnPreparation?.role&&!globalThis.YqnPreparation.viewing)return;
     const v = e.target;
     if (isAdPlaying()) {
+      wasAdPlaying = true;
       clearBoundaryTimer();
       silenceDetector.reset();
       restorePlaybackRate(v);
       viewingSavings.resetSample();
       updatePlaybackStatus(v);
       return;
+    }
+    if (wasAdPlaying) {
+      wasAdPlaying = false;
+      const vid = getVideoId();
+      if (
+        vid &&
+        settings.autoCut &&
+        !cutIgnored &&
+        !cutPlanningFor &&
+        adRetriedForVideo !== vid &&
+        (!cutPlan ||
+          cutPlan.videoId !== vid ||
+          (lastPlanInfo?.sawAd && (!!planWarnings(lastPlanInfo) || !lastPlanInfo?.transcriptLines || !lastPlanInfo?.duration)))
+      ) {
+        adRetriedForVideo = vid;
+        void startAutoCut(true, true);
+      }
     }
     if (toolsPreview && v===getVideoEl()) {
       clearBoundaryTimer();
@@ -5785,6 +5895,7 @@
       v.__yqnSteadyRate = v.playbackRate || 1;
     }
     nativeTopics=null;
+    wasAdPlaying=false;
     closeVideoTools?.();closeVideoTools=null;toolsPreview=null;transcriptForTools=null;reviewApproval=null;
     preferenceEpoch++;
     preferencesFor = null;

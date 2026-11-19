@@ -12,11 +12,11 @@ function harness() {
   const context = { console, URL, URLSearchParams, TextEncoder, performance, AbortController, AbortSignal, crypto: require('node:crypto').webcrypto,
     location: { pathname: '/watch', search: '?v=videoAAAAAA', origin: 'https://www.youtube.com' },
     chrome: { runtime: { id: 'test' }, storage: { onChanged: { addListener() {} } } },
-    document: { getElementById() { return null; }, querySelector() { return null; }, addEventListener() {} },
+    document: { getElementById() { return null; }, querySelector() { return null; }, querySelectorAll() { return []; }, addEventListener() {}, removeEventListener() {} },
     setTimeout(fn, ms) { const t = setTimeout(fn, ms); t.unref(); return t; }, clearTimeout,
     setInterval() {}, clearInterval, requestAnimationFrame() {}, video,
   };
-  context.window = { addEventListener() {}, postMessage() {}, dispatchEvent() {} };
+  context.window = { addEventListener() {}, removeEventListener() {}, postMessage() {}, dispatchEvent() {} };
   context.Event=Event;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'plan-cache.js'), 'utf8'), context);
@@ -1002,4 +1002,123 @@ test('v1.46: injected passive caption mode avoids extra /next and /player reques
   assert.equal(reply.payload.heatmap.length, 1);
   assert.deepEqual(Array.from(reply.payload.transcript), []);
   assert.deepEqual(fetchCalls, [], 'Passive caption mode must not call /next or /player when heatmap is already in watchFlexy');
+});
+
+test('v1.46.2: Thorough 0-checked fallback keeps heatmap/SponsorBlock speedups, retries 429 + legacy Sonnet 5 404, and auto-recovers after pre-roll ads', async () => {
+  const { api, context, video } = harness();
+  video.duration = 600;
+  video.paused = false;
+  video.seeking = false;
+  video.playbackRate = 1;
+
+  // 1) When Thorough fails completely (0 lines checked, e.g. missing transcript or API failure),
+  //    heatmap speed-ups and SponsorBlock filler speed-ups MUST remain active instead of being wiped out by unreviewed.
+  api.setSettings({
+    autoCut: true,
+    cutMessaging: true,
+    cutBoring: true,
+    autoCutPlus: false,
+    thoroughAnalysis: true,
+    aiHighlights: true,
+    anthropicKey: 'test-key',
+    aiModel: 'claude-sonnet-5',
+  });
+  api.setProxy(async () => ({
+    ok: true,
+    status: 200,
+    body: [{
+      videoID: 'videoAAAAAA',
+      segments: [
+        { segment: [20, 50], category: 'sponsor', actionType: 'skip' },
+        { segment: [70, 95], category: 'filler', actionType: 'skip' },
+      ],
+    }],
+  }));
+  const heatmap = Array.from({ length: 20 }, (_, i) => ({
+    start: i * 30,
+    end: (i + 1) * 30,
+    score: i >= 8 && i <= 9 ? 0.05 : 0.72, // 240..300s low-replay valley
+  }));
+  api.setPageData(async () => ({ duration: 600, heatmap, transcript: [] }));
+
+  const fallbackPlan = await api.realBuildCutPlan('videoAAAAAA', () => true, () => {});
+  assert.match(fallbackPlan.info.thoroughError, /No usable transcript/);
+  assert.equal(fallbackPlan.info.aiModelUsed, null, 'Failed 0-line Thorough plan should not claim AI model produced cuts');
+  assert.ok(fallbackPlan.segments.some((s) => s.action === 'speed' && s.start === 70 && s.end === 95), 'SponsorBlock filler speed-up preserved');
+  assert.ok(fallbackPlan.segments.some((s) => s.action === 'speed' && s.start >= 240 && s.end <= 300), 'Heatmap low-replay speed-up preserved when Thorough checked 0 lines');
+
+  // 2) Legacy claude-sonnet-5 404 falls back to claude-sonnet-5-5, and 429 backs off via Retry-After and succeeds.
+  const seenModels = [];
+  let callNum = 0;
+  context.YqnAI.request = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    seenModels.push(body.model);
+    callNum++;
+    if (callNum === 1) {
+      return { ok: false, status: 404, json: async () => ({ error: { message: 'model: claude-sonnet-5 not found' } }) };
+    }
+    if (callNum === 2) {
+      return {
+        ok: false,
+        status: 429,
+        headers: { get: (h) => (h === 'retry-after' ? '0.01' : null) },
+        json: async () => ({ error: { message: 'rate limit exceeded' } }),
+      };
+    }
+    const input = JSON.parse(body.messages[0].content);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        stop_reason: 'end_turn',
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            sections: input.lines.map((l) => ({
+              firstLine: l.id,
+              lastLine: l.id,
+              kind: l.id === 1 ? 'repetition' : 'explanation',
+              action: l.id === 1 ? 'speed' : 'keep',
+              certainty: 'high',
+              reason: l.id === 1 ? 'Repeated recap' : 'Core point',
+              evidence: l.text,
+            })),
+            summary: 'Checked',
+            takeaways: [],
+            chapters: [],
+            mentions: [],
+          }),
+        }],
+      }),
+    };
+  };
+  api.setPageData(async () => ({
+    duration: 180,
+    heatmap: [],
+    transcript: [
+      { start: 100, end: 120, text: 'First core technical point with concrete numbers.' },
+      { start: 120, end: 140, text: 'Repeating that exact technical recap a second time.' },
+      { start: 140, end: 160, text: 'Final takeaway conclusion for the section.' },
+    ],
+  }));
+  const recovered = await api.realBuildCutPlan('videoAAAAAA', () => true, () => {});
+  assert.equal(seenModels[0], 'claude-sonnet-5');
+  assert.equal(seenModels[1], 'claude-sonnet-5-5');
+  assert.equal(recovered.info.aiModelUsed, 'claude-sonnet-5-5');
+  assert.equal(recovered.info.thoroughError, undefined);
+  assert.ok(recovered.segments.some((s) => s.action === 'speed' && s.start === 120 && s.end === 140));
+
+  // 3) Pre-roll ad transition (ad-showing -> normal) triggers automatic re-analysis when initial plan saw an ad and failed.
+  const player = { classList: { _ad: true, contains(c) { return this._ad && c === 'ad-showing'; } } };
+  context.document.querySelector = (sel) => (sel === '#movie_player, .html5-video-player' ? player : null);
+  api.setPlan({ videoId: 'videoAAAAAA', segments: [] });
+  api.setInfo({ sawAd: true, aiEnabled: true, transcriptLines: 0, thoroughError: 'No usable transcript' });
+  api.setPlanning(null);
+  const beforeBuilds = api.seen.builds;
+  api.onCutTick({ target: video }); // while ad is playing
+  assert.equal(api.seen.builds, beforeBuilds);
+  player.classList._ad = false;
+  api.onCutTick({ target: video }); // ad just finished -> auto-retries once!
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(api.seen.builds, beforeBuilds + 1, 'Finishing a pre-roll ad automatically retries incomplete ad-blocked analysis');
 });

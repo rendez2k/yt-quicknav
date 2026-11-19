@@ -99,7 +99,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         summary:'Fixture summary',takeaways:['Fixture takeaway'],mentions:[]
       })}]}});
     });
-    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.46.1';
+    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.46.2';
     await context.route('https://api.github.com/**', async route => {
       const headers={'access-control-allow-origin':'*','content-type':'application/json'};
       return route.fulfill({status:200,headers,json:{
@@ -601,10 +601,14 @@ test('installed extension: playback, preferences, editing, navigation, failures 
     });
     await t.test('truncated AI output cannot become a complete Thorough plan',async()=>{
       thoroughMode='truncated';await page.getByRole('button',{name:'↻ Re-analyse'}).click();await ready();
-      assert.match(await page.locator('#yqn-cut-panel').textContent(),/Thorough analysis incomplete.*max_tokens/);
+      assert.equal(await page.locator('#yqn-cut-panel .yqn-cp-body > :first-child').evaluate(el=>el.className),'yqn-cp-alert','Incomplete reason banner renders at the very top of Auto-Cut');
+      assert.match(await page.locator('#yqn-cut-panel .yqn-cp-alert').textContent(),/Thorough analysis incomplete.*max_tokens/);
       assert.match(await page.locator('.yqn-cp-coverage').textContent(),/0\/60 caption lines/);
       assert.match(await page.locator('#yqn-toast').textContent(),/Analysis incomplete/);
       assert.ok(!(await page.locator('#yqn-toast').textContent()).includes('AI found no clear'));
+      // Fallback preserves SponsorBlock filler speed-up [60,90] when 0 Thorough lines were verified, while keeping unreviewed 285s untouched.
+      await page.evaluate(()=>{const v=document.querySelector('video');v.playbackRate=1;v.currentTime=65;});
+      await page.waitForFunction(()=>document.querySelector('video').playbackRate>=2);
       await page.evaluate(()=>document.querySelector('video').currentTime=285);
       await page.waitForTimeout(300);assert.equal(await page.evaluate(()=>document.querySelector('video').currentTime),285);
       thoroughMode='ok';
@@ -1490,7 +1494,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       const singleRow=await page.evaluate(()=>{const a=document.querySelector('#yqn-quick-bar .yqn-link-strip').getBoundingClientRect();const b=document.querySelector('#yqn-tools-btn').getBoundingClientRect();return Math.abs(a.top-b.top)<4;});
       assert.equal(singleRow,true,'All 19 toolbar controls fit on a single row at 1120px watch width');
 
-      assert.equal(await popup.locator('#extVersion').textContent(),'v1.46.1');
+      assert.equal(await popup.locator('#extVersion').textContent(),'v1.46.2');
       await popup.locator('#checkUpdatesBtn').click();
       await page.waitForTimeout(50);
       await popup.waitForFunction(()=>!document.querySelector('#updateBanner')?.hidden);
