@@ -3,11 +3,20 @@
   'use strict';
   function clean(items, duration=0, source='ai') {
     const seen=new Set();
-    return (Array.isArray(items)?items:[]).filter(c=>c && typeof c.start==='number' &&
+    const sorted=(Array.isArray(items)?items:[]).filter(c=>c && typeof c.start==='number' &&
       Number.isFinite(c.start) && c.start>=0 && (!duration || c.start<duration) &&
       typeof c.title==='string' && c.title.trim()).sort((a,b)=>a.start-b.start)
-      .filter(c=>{if(seen.has(c.start))return false;seen.add(c.start);return true;})
-      .slice(0,100).map(c=>({start:c.start,title:c.title.trim().slice(0,100),source}));
+      .filter(c=>{if(seen.has(c.start))return false;seen.add(c.start);return true;});
+    if(source!=='ai')return sorted.slice(0,100).map(c=>({start:c.start,title:c.title.trim().slice(0,100),source}));
+    const minGap=18;
+    const maxAi=duration>0 ? Math.min(40,Math.max(12,Math.ceil(duration/35))) : 24;
+    const spaced=[];
+    for(const c of sorted){
+      if(!spaced.length || c.start-spaced[spaced.length-1].start>=minGap){
+        spaced.push({start:c.start,title:c.title.trim().slice(0,100),source});
+      }
+    }
+    return spaced.slice(0,maxAi);
   }
   function fromDescription(description,duration) {
     const items=[];

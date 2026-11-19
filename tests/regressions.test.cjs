@@ -1123,6 +1123,21 @@ test('v1.46.2: Thorough 0-checked fallback keeps heatmap/SponsorBlock speedups, 
   api.onCutTick({ target: video }); // ad just finished -> auto-retries once!
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(api.seen.builds, beforeBuilds + 1, 'Finishing a pre-roll ad automatically retries incomplete ad-blocked analysis');
+
+  // 4) Smooth Thorough speed continuity across 2.8s cue breath gaps + heatmap speed on uncaptioned B-roll gaps (while verified keeps still win).
+  const merged = api.normalizeSegments([
+    { start: 0, end: 300, action: 'keep', source: 'unreviewed' }, // uncaptioned baseline (no protect)
+    { start: 10, end: 18, action: 'speed', reason: 'Unboxing banter', kind: 'other', source: 'thorough', verified: true },
+    // 2.8s breath/jump-cut gap 18..20.8s between two consecutive get_transcript cues!
+    { start: 20.8, end: 30, action: 'speed', reason: 'Unboxing banter', kind: 'other', source: 'thorough', verified: true },
+    // 45s uncaptioned B-roll montage 60..105s with low replays, plus reviewed speech 120..150s overlapping low replays:
+    { start: 60, end: 150, action: 'speed', reason: 'low replays' },
+    { start: 120, end: 150, action: 'keep', reason: 'Print quality verdict', kind: 'explanation', source: 'thorough', verified: true, protect: true },
+  ], 300);
+  const continuousSpeed = merged.find((s) => s.start === 10 && s.action === 'speed');
+  assert.ok(continuousSpeed && continuousSpeed.end === 30, `2.8s cue gap between Thorough speeds should bridge into 10..30s, got ${JSON.stringify(continuousSpeed)}`);
+  assert.equal(merged.find((s) => s.start <= 80 && s.end > 80)?.action, 'speed', 'Uncaptioned B-roll low-replay valley speeds through');
+  assert.equal(merged.find((s) => s.start <= 135 && s.end > 135)?.action, 'keep', 'Reviewed speech still overrides low-replay speed');
   } finally {
     clearInterval(keepAlive);
   }

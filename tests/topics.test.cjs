@@ -25,4 +25,10 @@ test('topic normalisation rejects invalid anchors and keeps titles as plain data
   assert.deepEqual(T.clean([{start:NaN,title:'Bad'},{start:null,title:'Bad'},{start:'1',title:'Bad'},
     {start:12,title:'<b>App</b>'},{start:12,title:'Duplicate'},{start:70,title:'Too late'}],60),
     [{start:12,title:'<b>App</b>',source:'ai'}]);
+  // Dense AI micro-chapters (e.g. 47 topics in 649s = 1 every 13s) are spaced >=18s and capped cleanly, while native chapters keep every entry.
+  const micro47=Array.from({length:47},(_,i)=>({start:i*13,title:`Step ${i+1}`}));
+  const cleanedAi=T.clean(micro47,649,'ai');
+  assert.ok(cleanedAi.length<=19,`Expected <=19 AI topics on 10:49 video, got ${cleanedAi.length}`);
+  assert.ok(cleanedAi.every((c,i)=>i===0||c.start-cleanedAi[i-1].start>=18),'AI topics spaced >=18s apart');
+  assert.equal(T.clean(micro47,649,'youtube').length,47,'Creator-authored YouTube chapters stay untouched');
 });

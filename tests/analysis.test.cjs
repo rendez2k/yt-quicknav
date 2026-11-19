@@ -115,6 +115,16 @@ test('typographic quote differences preserve exact words without allowing paraph
   const invented=response(input,{action:'skip',kind:'sponsor',evidence:'Today\'s sponsor - Acme - says "buy now".'});
   const rejected=A.reconcile(good,invented,chunk);
   assert.equal(rejected.segments[0].action,'keep');assert.equal(rejected.audit.quoteMismatch,1);
+
+  // Unpunctuated YouTube auto-captions accept punctuated/contracted verbatim quotes, while rejecting ellipses or word swaps.
+  const asrLines=A.prepare([{start:10,end:16,text:'oh my gosh guys lets go ahead and cut open the tape right now'}],30);
+  const asrChunk=A.chunksFor(asrLines)[0],asrInput={lines:asrLines,coreFirst:0,coreLast:0};
+  const punctuated=response(asrInput,{action:'speed',kind:'other',evidence:'Oh my gosh guys, let\'s go ahead and cut open the tape!'});
+  const asrAccepted=A.reconcile(punctuated,punctuated,asrChunk);
+  assert.equal(asrAccepted.segments[0].action,'speed');
+  assert.equal(asrAccepted.audit.quoteMismatch,0);
+  const ellipsisQuote=response(asrInput,{action:'speed',kind:'other',evidence:'oh my gosh ... cut open the tape'});
+  assert.equal(A.reconcile(ellipsisQuote,ellipsisQuote,asrChunk).audit.quoteMismatch,1);
 });
 test('audit separates deliberate keeps, accepted cuts and verification failures',()=>{
   const chunk=A.chunksFor(A.prepare(transcript,650))[0],input={lines:chunk.lines,coreFirst:chunk.first,coreLast:chunk.last};

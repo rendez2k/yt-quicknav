@@ -4277,7 +4277,7 @@
       hit &&
       Array.isArray(hit.segments) &&
       now - hit.ts < CUT_CACHE_TTL &&
-      (!hit.settingsKey || String(hit.settingsKey).startsWith('["v2",'))
+      (!hit.settingsKey || String(hit.settingsKey).startsWith('["v3",'))
     );
   }
 
@@ -4697,9 +4697,12 @@
       "the end — middle and late chapters matter just as much as the opening, " +
       "so never treat highlights as a sparse trailer or drop coverage in the " +
       "second half of a long video. Everything left outside highlights (and " +
-      "not in skip) will be fast-forwarded: leave out only genuine repetition, " +
-      "slow rambling, filler transitions or chit-chat, never multi-minute " +
-      "substantive topics. " +
+      "not in skip) will be fast-forwarded (2x-3x, still visible and audible): " +
+      "leave routine unboxing/setup play-by-play (cutting boxes, peeling " +
+      "stickers, plugging cables, waiting on calibration), excited reaction " +
+      "filler/hype, personal backstory/chit-chat, filler transitions and " +
+      "genuine repetition outside highlights so they move briskly, never " +
+      "dropping multi-minute substantive topics. " +
       (plusAI
         ? "Quick watch mode: leave verbose setup, repeated examples and slow " +
           "recaps outside highlights so they play faster, while still keeping " +
@@ -5038,6 +5041,7 @@
       const chosen=covering.find(s => s.source === "sponsorblock" && s.action === "skip" && s.sponsor) ||
         covering.find(s => s.verified) ||
         covering.find(s => s.action === "keep" && s.source !== "unreviewed") ||
+        covering.find(s => s.action === "speed" && (s.source === "heatmap" || s.reason === "low replays")) ||
         covering.find(s => s.source === "unreviewed") ||
         covering.find(s => s.action === "skip" && s.sponsor) ||
         covering.find(s => s.action === "skip") || covering[0];

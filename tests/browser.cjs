@@ -99,7 +99,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         summary:'Fixture summary',takeaways:['Fixture takeaway'],mentions:[]
       })}]}});
     });
-    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.46.2';
+    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.47.0';
     await context.route('https://api.github.com/**', async route => {
       const headers={'access-control-allow-origin':'*','content-type':'application/json'};
       return route.fulfill({status:200,headers,json:{
@@ -1464,7 +1464,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       await worker.evaluate(async()=>{
         const now=Date.now();
         await chrome.storage.local.set({cutCacheV15:{
-          prepCut0001:{ts:now,settingsKey:'["v2",true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:10,end:60,action:'skip'}]},
+          prepCut0001:{ts:now,settingsKey:'["v3",true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:10,end:60,action:'skip'}]},
           prepClean01:{ts:now,complete:true,segments:[]},
           prepLeg0001:{ts:now,settingsKey:'[true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:10,end:70,action:'skip'},{start:100,end:900,action:'speed'}]},
           prepStale01:{ts:now,settingsKey:'[true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:0,end:900,action:'speed'}]},
@@ -1494,7 +1494,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       const singleRow=await page.evaluate(()=>{const a=document.querySelector('#yqn-quick-bar .yqn-link-strip').getBoundingClientRect();const b=document.querySelector('#yqn-tools-btn').getBoundingClientRect();return Math.abs(a.top-b.top)<4;});
       assert.equal(singleRow,true,'All 19 toolbar controls fit on a single row at 1120px watch width');
 
-      assert.equal(await popup.locator('#extVersion').textContent(),'v1.46.2');
+      assert.equal(await popup.locator('#extVersion').textContent(),'v1.47.0');
       await popup.locator('#checkUpdatesBtn').click();
       await page.waitForTimeout(50);
       await popup.waitForFunction(()=>!document.querySelector('#updateBanner')?.hidden);

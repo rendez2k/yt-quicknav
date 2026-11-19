@@ -14,10 +14,18 @@
     mentions:{type:'array',items:{type:'object',properties:{name:{type:'string'},url:{type:'string'}},
       required:['name','url'],additionalProperties:false}}},
     required:['sections','summary','takeaways','chapters','mentions'],additionalProperties:false};
-  // Accept equivalent typography, never paraphrases, missing words or fuzzy matches.
+  // Accept equivalent typography and ASR punctuation/contraction differences,
+  // never paraphrases, ellipses, missing middle words or fuzzy matches.
   const normal = value => String(value || '').normalize('NFKC').toLowerCase()
     .replace(/[‘’ʼ]/g,"'").replace(/[“”]/g,'"').replace(/[‐‑‒–—]/g,'-')
     .replace(/[\u00ad\u200b\ufeff]/g,'').replace(/\s*-\s*/g,'-').replace(/\s+/g,' ').trim();
+  const hasEllipsis = value => /\.{2,}|…/.test(String(value || ''));
+  const wordsOnly = value => normal(value)
+    .replace(/'/g,'')
+    .replace(/[^\p{L}\p{N}\s-]+/gu,' ')
+    .replace(/-/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
   const auditKeys=['reviewedKeep','proposedCut','acceptedCut','proposedSpeed','acceptedSpeed','proposedSkip','acceptedSkip','quoteMismatch','lowCertainty','disagreement','missingReview','overlappingReview','invalidSections'];
   const newAudit=()=>Object.fromEntries(auditKeys.map(key=>[key,0]));
   function auditText(audit) {
@@ -89,9 +97,14 @@
           !KINDS.includes(s.kind) || !['keep','speed','skip'].includes(s.action)) return [];
       const first=Math.max(chunk.first,s.firstLine), last=Math.min(chunk.last,s.lastLine);
       if (last<first) return [];
-      const excerpt=normal(s.evidence);
-      const text=normal(chunk.lines.filter(l=>l.id>=s.firstLine && l.id<=s.lastLine).map(l=>l.text).join(' '));
-      const grounded=excerpt.length>=12 && text.includes(excerpt);
+      const rawSection=chunk.lines.filter(l=>l.id>=s.firstLine && l.id<=s.lastLine).map(l=>l.text).join(' ');
+      const excerpt=normal(s.evidence), text=normal(rawSection);
+      const wExcerpt=wordsOnly(s.evidence), wText=wordsOnly(rawSection);
+      const minWordsLen=Math.min(10,Math.max(5,wText.length));
+      const grounded=!hasEllipsis(s.evidence) && (
+        (excerpt.length>=12 && text.includes(excerpt)) ||
+        (wExcerpt.length>=minWordsLen && (' '+wText+' ').includes(' '+wExcerpt+' '))
+      );
       return [{...s,firstLine:first,lastLine:last,grounded,reason:String(s.reason || s.kind).slice(0,100),
         evidence:String(s.evidence || '').slice(0,400)}];
     });
@@ -145,12 +158,12 @@
     'Classify EVERY caption line in coreFirst..coreLast exactly once. Group adjacent lines with the same decision into one section; do not create one object per caption unless the decision changes. Use firstLine/lastLine IDs, never invent timestamps. ' +
     'Neighbouring lines are context only. Split mixed sections at caption boundaries and preserve complete surrounding sentences. ' +
     'Kinds: sponsor, intro, outro, demonstration, explanation, repetition, tangent, other. ' +
-    'Make a pacing pass as well as a sponsor pass. Keep key facts, first explanations of new ideas, essential instructions, important visual demonstrations, results and conclusions at normal speed. ' +
+    'Make a pacing pass as well as a sponsor pass. Keep key facts, concrete specifications, comparisons, warnings, problem diagnoses, first explanations of new ideas, essential non-obvious instructions, and actual results/verdicts/conclusions at normal speed. ' +
     'There is NO target amount to remove: an entire dense tutorial can be keep. A caption gap is not silence or evidence of low value. ' +
-    'Speed means watch the passage faster, not remove it. Actively mark speed on recaps, repeated explanations or examples, rhetorical build-up, conversational padding, wordy transitions, subjective rambling and off-topic asides whose gist remains useful — most conversational or commentary videos have several 10s–90s passages that benefit from faster playback. Content can be useful without requiring normal speed; do not restrict speed to literal repeated wording, and do not blanket-mark an entire multi-minute topic as speed when new claims, numbers, demonstrations or conclusions appear inside it. ' +
+    'Speed means watch the passage faster (2x–3x, viewer still sees visuals and hears every word), not remove it. Actively mark speed on: (1) routine physical prep or unboxing play-by-play (cutting boxes/tape, unpacking foam, peeling stickers, plugging cables, generic Wi-Fi/account menus, waiting on calibration or progress bars), (2) excited reaction filler, hype and waiting commentary ("oh my gosh, so cool, let\'s see what happens, look how fast it moves") once what is being tested is clear, (3) personal anecdotes, casual backstory, rhetorical build-up and chatty setup before a real point, and (4) recaps, repeated explanations/examples, conversational padding, wordy transitions and off-topic asides. Do not mistake casual unboxing, reaction banter or watching a machine run for an essential demonstration — keep the setup premise and the finished result/verdict at normal speed, and speed the routine middle commentary. Group contiguous speed lines into clean 10s–90s spans rather than isolated single-caption specks, returning to keep as soon as concrete specs, numbers, problems or conclusions appear. ' +
     (pacing==='quick'
       ? 'QUICK WATCH pacing: also speed through narrated routine setup, familiar intermediate steps and extended demonstrations after their key mechanism is established. Split around new facts, critical settings, warnings, first demonstrations and results so those stay normal. Use captions as evidence; do not guess what unseen visuals contain. '
-      : 'BALANCED pacing: speed through the low-information passages above while keeping the first useful explanation or demonstration of each topic at normal speed. ') +
+      : 'BALANCED pacing: speed through all four low-density categories above (routine unboxing/prep play-by-play, reaction/hype filler, chatty backstory/transitions, and repetition) while keeping concrete explanations, specs, non-obvious steps, and actual results/verdicts at normal speed. ') +
     'Skip only clearly dispensable introductions, sign-offs or promotions. A speed decision may have medium or high certainty when the evidence supports faster viewing; use low for unresolved uncertainty. Skips require high certainty. ' +
     'For every speed or skip give a short EXACT contiguous transcript quote from within that section, with the original words and punctuation; never paraphrase or use ellipses to join excerpts. Give high/medium/low certainty (not a calibrated probability). ' +
     'A product mention, critical review, instruction or discount discussion alone is not an advert. The sponsor kind covers third-party advertising AND commercial self-promotion. ' +
@@ -159,9 +172,9 @@
     'Requests to donate, send Super Thanks or Super Chats, become a patron/member, or join the creator\'s promoted private community are sponsor + skip. Include the explanation of benefits and how to support them; those are part of the pitch, not protected tutorial instructions. Stop when the actual review/tutorial resumes. ' +
     'Preserve actual review findings, product specifications, buying advice comparing sellers, and instructions about the video\'s subject; a store link in the description alone is not evidence of a spoken advert. ' +
     'Include all of the promotional pitch but stop before substantive content resumes. If a caption mixes valuable content with a pitch, keep it. ' +
-    (pass==='review' ? 'Independently verify the draft, correct its boundaries, protect key content and search the ENTIRE core for missed sponsor reads, self-promotion and pacing opportunities. Check speed proposals as faster viewing, not as deletion. Do not simply endorse the draft. Resolve low-confidence uncertainty to keep. ' : '') +
-    'Return compact JSON using the supplied schema. Keep each reason under 10 words. Evidence quotes for speed/skip must be 12–120 characters long; keep sections may use an empty quote. Keep the summary under 60 words and return at most 3 short takeaways. Summary and takeaways refer only to this core; empty takeaways are allowed. ' +
-    'Chapters are real topic changes within the core with a firstLine ID and specific short title, not arbitrary chunk boundaries. In a list of apps, products or tips, mark the START of EVERY new item, named after that item, even if the entire item is kept at normal speed. A long review can need many chapters; do not collapse different items into one chapter. ' +
+    (pass==='review' ? 'Independently verify the draft, refine its boundaries, protect key facts/results and search the ENTIRE core for missed sponsor reads, self-promotion and pacing opportunities. Check speed proposals as faster viewing (2x–3x, nothing is deleted), not as deletion: confirm draft speed sections whenever the passage is routine unboxing/setup play-by-play, reaction filler, chatty backstory, transitions or repetition rather than shrinking them into tiny fragments; only revert speed to keep where concrete specs, warnings, problem diagnoses or results/verdicts are spoken. Do not rubber-stamp unsupported skips. Resolve low-confidence uncertainty to keep. ' : '') +
+    'Return compact JSON using the supplied schema. Keep each reason under 10 words. Evidence quotes for speed/skip must be 12–120 characters long and copied verbatim from the captions; keep sections may use an empty quote. Keep the summary under 60 words and return at most 3 short takeaways. Summary and takeaways refer only to this core; empty takeaways are allowed. ' +
+    'Chapters are major topic changes within the core (typically 0–3 per core, at least ~25s apart) with a firstLine ID and specific short title — never mark minor sub-steps, individual reactions, or rapid-fire mentions every few seconds. In a structured review of distinct apps or products, mark the start of each main item. ' +
     'Mentions list resources actually discussed; use an exact URL from the description only, otherwise use an empty URL. Empty chapters and mentions are allowed.';
 
   function sampleAcross(items, limit) {
@@ -197,8 +210,8 @@
       return idx>0 ? queue.splice(idx,1)[0] : queue.shift();
     };
     let limited=chunks.length>maxChunks,reserved=0;
-    // Unknown visual/caption gaps and unchecked sections stay at normal speed.
-    const unknown={start:0,end:duration,action:'keep',kind:'other',reason:'No verified cut — kept',source:'unreviewed',protect:true};
+    // Unknown visual/caption gaps and unchecked sections default to normal speed unless unverified micro-gap / heatmap speed applies.
+    const unknown={start:0,end:duration,action:'keep',kind:'other',reason:'No verified cut — kept',source:'unreviewed'};
     const emit=stage=>{ if (current()) { syncNotes(); onProgress({...state,stage,segments:[unknown,...state.segments]}); } };
     emit('Preparing full transcript');
     if (!lines.length) {state.errors.push('No usable transcript');return {...state,segments:[unknown],complete:false};}

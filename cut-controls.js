@@ -219,7 +219,7 @@
       const next = segments[i + 1];
       if (cur && cur.action === 'keep' && !cur.verified && !cur.protect && prev && next) {
         const dur = cur.end - cur.start;
-        if (prev.action === 'speed' && next.action === 'speed' && dur <= 2.0 &&
+        if (prev.action === 'speed' && next.action === 'speed' && dur <= 3.5 &&
             Math.abs(cur.start - prev.end) < 0.05 && Math.abs(next.start - cur.end) < 0.05) {
           continue;
         }
@@ -239,7 +239,7 @@
       }
       const gap = seg.start - prev.end;
       const maxBridge = prev.action === 'skip' && seg.action === 'skip' ? 1.0
-        : prev.action === 'speed' && seg.action === 'speed' ? 2.0 : -1;
+        : prev.action === 'speed' && seg.action === 'speed' ? 3.5 : -1;
       if (maxBridge > 0 && gap >= 0 && gap <= maxBridge) {
         if (sameCutIdentity(prev, seg)) {
           if (Number.isFinite(prev.wpm) && Number.isFinite(seg.wpm)) {

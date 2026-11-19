@@ -1,5 +1,12 @@
 # YouTube Quick Nav + Cinema
 
+## Vlog / unboxing speed-through tuning, unpunctuated ASR quote matching, B-roll gap speed-ups & clean AI Topics — 1.47.0 (19 November 2026)
+
+- **Speeds through casual unboxing, setup play-by-play & reaction filler:** Teaches both AI passes that routine physical prep narration (cutting boxes/tape, peeling stickers, plugging cables, generic menus, waiting on calibration/prints), excited reaction hype, and chatty setup belong at `2×–3×` `speed` even in Balanced (`Custom`) mode — keeping actual specs, warnings, problems, and finished results/verdicts at `1×`.
+- **Fixes false `quote_mismatch` drops on unpunctuated YouTube auto-captions:** Matches exact contiguous word sequences so Claude adding punctuation or apostrophes (`"let's"`, commas, periods) to unpunctuated ASR captions no longer rejects valid `speed` sections.
+- **Smooth speed-through continuity & uncaptioned B-roll heatmap speed-ups:** Bridges `<= 3.5s` jump-cut/breath pauses between consecutive caption cues into continuous speed spans (eliminating tiny 3–5s amber fragments) and allows `Most Replayed` (`low replays`) to speed through uncaptioned B-roll/timelapse valleys while reviewed speech stays protected.
+- **De-clutters AI Topics (`>= 18s` spacing):** Prevents multi-chunk Thorough runs from generating `40–50` micro-topics on a 10-minute video while leaving creator-authored YouTube/description chapters untouched.
+
 ## Top-of-panel incomplete diagnostics, pre-roll ad auto-recovery, 429 backoff & fallback speed-ups — 1.46.2 (19 November 2026)
 
 - **Top-of-panel incomplete banner + 1-click `↻ Re-analyse` & `⚡ Switch to Quick watch`:** Surfaces the exact reason an analysis is incomplete right at the top of `#yqn-cut-panel` (instead of buried below `Topics`), extracts descriptive Anthropic API error messages, and adds a 1-click `⚡ Switch to Quick watch` action when a video has `0` speed-ups in `Custom` (`Balanced`) mode.
@@ -643,7 +650,7 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 
 ## Packaging for a friend (no keys shared)
 
-Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.46.2.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
+Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.47.0.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
 
 ## Development checks
 
