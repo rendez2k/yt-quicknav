@@ -1005,6 +1005,8 @@ test('v1.46: injected passive caption mode avoids extra /next and /player reques
 });
 
 test('v1.46.2: Thorough 0-checked fallback keeps heatmap/SponsorBlock speedups, retries 429 + legacy Sonnet 5 404, and auto-recovers after pre-roll ads', async () => {
+  const keepAlive = setInterval(() => {}, 50);
+  try {
   const { api, context, video } = harness();
   video.duration = 600;
   video.paused = false;
@@ -1121,4 +1123,7 @@ test('v1.46.2: Thorough 0-checked fallback keeps heatmap/SponsorBlock speedups, 
   api.onCutTick({ target: video }); // ad just finished -> auto-retries once!
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(api.seen.builds, beforeBuilds + 1, 'Finishing a pre-roll ad automatically retries incomplete ad-blocked analysis');
+  } finally {
+    clearInterval(keepAlive);
+  }
 });

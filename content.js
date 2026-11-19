@@ -3705,7 +3705,7 @@
       if ((res.status === 429 || res.status === 529) && attempt < 2 && current() && !signal?.aborted) {
         const retryHeader = Number(res.headers?.get?.("retry-after"));
         const waitMs = Number.isFinite(retryHeader) && retryHeader > 0
-          ? Math.min(10000, Math.max(1200, retryHeader * 1000))
+          ? Math.min(10000, Math.max(40, retryHeader * 1000))
           : attempt === 0 ? 2200 : 5000;
         await sleepAbortable(waitMs, signal, current);
         if (!current() || signal?.aborted) throw new Error("Analysis cancelled");
