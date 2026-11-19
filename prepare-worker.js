@@ -203,6 +203,9 @@
     if(changes.autoCut?.newValue===false)await stop(await read(),'Auto-Cut is off');
   }).catch(()=>{});});
   chrome.runtime.onStartup?.addListener(()=>{void locked(ensureAlarm).catch(()=>{});});
-  chrome.runtime.onInstalled?.addListener(()=>{void locked(ensureAlarm).catch(()=>{});});
+  chrome.runtime.onInstalled?.addListener(details=>{void locked(async()=>{
+    await ensureAlarm();
+    if(details?.reason==='update'){const c=await config();if(c.watchLaterPrepare&&c.autoCut)await start();}
+  }).catch(()=>{});});
   void locked(ensureAlarm).catch(()=>{});
 })();

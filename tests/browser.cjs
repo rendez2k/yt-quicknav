@@ -99,7 +99,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         summary:'Fixture summary',takeaways:['Fixture takeaway'],mentions:[]
       })}]}});
     });
-    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.46.0';
+    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.46.1';
     await context.route('https://api.github.com/**', async route => {
       const headers={'access-control-allow-origin':'*','content-type':'application/json'};
       return route.fulfill({status:200,headers,json:{
@@ -1447,12 +1447,14 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       const popup=await context.newPage();
       await popup.goto(`chrome-extension://${extensionId}/popup.html`);
       assert.equal(await popup.locator('details').count(),1,'Popup must maintain single <details> element');
-      // Auto-paint prepared Watch Later / playlist badges without hover (⚡ → mm:ss and ⚡ Ready), ignoring pre-v2 stale cache keys.
+      // Auto-paint prepared Watch Later / playlist badges without hover (⚡ → mm:ss and ⚡ Ready), sanitizing legacy v1 entries and auto-resolving visible SponsorBlock cards.
       await page.evaluate(()=>{
         const wrap=document.createElement('div');
-        wrap.innerHTML='<div data-yqn-thumb="prep1" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepCut0001">Cut</a><span data-yqn-duration>10:00</span></div>' +
-          '<div data-yqn-thumb="prep2" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepClean01">Clean</a><span data-yqn-duration>4:44</span></div>' +
-          '<div data-yqn-thumb="prepStale" style="width:200px;height:110px;position:relative"><a href="/watch?v=prepStale01">Stale</a><span data-yqn-duration>20:00</span></div>';
+        wrap.innerHTML='<div data-yqn-thumb="prep1" style="width:180px;height:90px;position:relative;display:inline-block"><a href="/watch?v=prepCut0001">Cut</a><span data-yqn-duration>10:00</span></div>' +
+          '<div data-yqn-thumb="prep2" style="width:180px;height:90px;position:relative;display:inline-block"><a href="/watch?v=prepClean01">Clean</a><span data-yqn-duration>4:44</span></div>' +
+          '<div data-yqn-thumb="prepLegacy" style="width:180px;height:90px;position:relative;display:inline-block"><a href="/watch?v=prepLeg0001">Legacy</a><span data-yqn-duration>10:00</span></div>' +
+          '<div data-yqn-thumb="prepStale" style="width:180px;height:90px;position:relative;display:inline-block"><a href="/watch?v=prepStale01">Stale</a><span data-yqn-duration>20:00</span></div>' +
+          '<ytd-playlist-video-renderer id="yqn-auto-sb-row" style="display:inline-block;width:180px;height:90px;position:relative"><ytd-thumbnail style="display:block;width:180px;height:90px;position:relative"><a id="thumbnail" href="/watch?v=videoEEEEEE">SB</a><ytd-thumbnail-overlay-time-status-renderer><span id="text">10:00</span></ytd-thumbnail-overlay-time-status-renderer></ytd-thumbnail></ytd-playlist-video-renderer>';
         document.body.appendChild(wrap);
       });
       await worker.evaluate(async()=>{
@@ -1460,14 +1462,20 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         await chrome.storage.local.set({cutCacheV15:{
           prepCut0001:{ts:now,settingsKey:'["v2",true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:10,end:60,action:'skip'}]},
           prepClean01:{ts:now,complete:true,segments:[]},
+          prepLeg0001:{ts:now,settingsKey:'[true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:10,end:70,action:'skip'},{start:100,end:900,action:'speed'}]},
           prepStale01:{ts:now,settingsKey:'[true,true,false,false,"claude-haiku-5-5",false,false,false,false]',complete:true,segments:[{start:0,end:900,action:'speed'}]},
         }});
+        await chrome.storage.sync.set({cutMessaging:true});
       });
       await page.locator('[data-yqn-thumb="prep1"] .yqn-thumb-badge').waitFor();
       await page.locator('[data-yqn-thumb="prep2"] .yqn-thumb-badge').waitFor();
+      await page.locator('[data-yqn-thumb="prepLegacy"] .yqn-thumb-badge').waitFor();
+      await page.locator('#yqn-auto-sb-row .yqn-thumb-badge').waitFor();
       assert.equal(await page.locator('[data-yqn-thumb="prep1"] .yqn-thumb-badge').textContent(),'⚡ → 9:10');
       assert.equal(await page.locator('[data-yqn-thumb="prep2"] .yqn-thumb-badge').textContent(),'⚡ Ready');
-      assert.equal(await page.locator('[data-yqn-thumb="prepStale"] .yqn-thumb-badge').count(),0,'Stale pre-v2 cached plans must not paint outdated badges');
+      assert.equal(await page.locator('[data-yqn-thumb="prepLegacy"] .yqn-thumb-badge').textContent(),'→ 9:00');
+      assert.equal(await page.locator('#yqn-auto-sb-row .yqn-thumb-badge').textContent(),'→ 9:06','Visible playlist card resolves SponsorBlock runtime estimate without hover');
+      assert.equal(await page.locator('[data-yqn-thumb="prepStale"] .yqn-thumb-badge').count(),0,'Runaway 900s pre-v2 segment is stripped');
 
       // Distinct navigation links vs per-video action toggles (#yqn-wl-btn Save Later/Saved, #yqn-like-btn Like, History ↗, Watch Later ↗, Liked list ↗).
       await worker.evaluate(()=>chrome.storage.sync.set({showToggle:true,showLike:true,showWatchLater:true,showHistory:true,showLiked:true}));
@@ -1482,7 +1490,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       const singleRow=await page.evaluate(()=>{const a=document.querySelector('#yqn-quick-bar .yqn-link-strip').getBoundingClientRect();const b=document.querySelector('#yqn-tools-btn').getBoundingClientRect();return Math.abs(a.top-b.top)<4;});
       assert.equal(singleRow,true,'All 19 toolbar controls fit on a single row at 1120px watch width');
 
-      assert.equal(await popup.locator('#extVersion').textContent(),'v1.46.0');
+      assert.equal(await popup.locator('#extVersion').textContent(),'v1.46.1');
       await popup.locator('#checkUpdatesBtn').click();
       await page.waitForTimeout(50);
       await popup.waitForFunction(()=>!document.querySelector('#updateBanner')?.hidden);

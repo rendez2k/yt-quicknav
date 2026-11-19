@@ -5,10 +5,10 @@ async function harness(saved){
   const local=saved?.local||{},sync=saved?.sync||{autoCut:true,cutMessaging:true},tabs=saved?.tabs||new Map(),windows=saved?.windows||new Map([[1,{id:1,state:'normal',focused:true}]]),alarms=new Map(),removed=[],created=[],sent=[],windowCreates=[];
   let next=Math.max(100,...tabs.keys())+1,nextWindow=Math.max(20,...windows.keys())+1;
   const event=()=>({listeners:[],addListener(fn){this.listeners.push(fn);},fire(...a){for(const fn of this.listeners)fn(...a);}});
-  const messages=event(),alarmEvent=event(),changed=event(),activated=event(),attached=event(),removedEvent=event(),focused=event(),bounds=event();
+  const messages=event(),installed=event(),alarmEvent=event(),changed=event(),activated=event(),attached=event(),removedEvent=event(),focused=event(),bounds=event();
   const storage=store=>({async get(keys){if(typeof keys==='string')return clone({[keys]:store[keys]});return clone({...keys,...Object.fromEntries(Object.keys(keys).filter(k=>k in store).map(k=>[k,store[k]]))});},async set(patch){Object.assign(store,clone(patch));}});
   const context={URL,crypto:require('node:crypto').webcrypto,console,chrome:{
-    runtime:{id:'test',onMessage:messages},storage:{local:storage(local),sync:storage(sync),onChanged:changed},
+    runtime:{id:'test',onMessage:messages,onInstalled:installed},storage:{local:storage(local),sync:storage(sync),onChanged:changed},
     alarms:{onAlarm:alarmEvent,async get(id){return alarms.get(id);},async create(id,data){alarms.set(id,data);},async clear(id){alarms.delete(id);}},
     windows:{onFocusChanged:focused,onBoundsChanged:bounds,async create(data){
       windowCreates.push(clone(data));if(saved?.failCreate)throw Error('blocked');
@@ -27,7 +27,7 @@ async function harness(saved){
   const state=()=>local.yqnPreparationV1;
   const jobSender=()=>({id:'test',tab:clone(tabs.get(state().job.tabId)),url:tabs.get(state().job.tabId).url});
   const restore=async()=>{const win=windows.get(state().job.windowId);win.state='normal';win.focused=true;focused.fire(win.id);await flush();};
-  return {local,sync,tabs,windows,windowCreates,alarms,created,removed,sent,changed,activated,attached,focused,bounds,restore,alarmEvent,msg,state,jobSender,flush,cache:context.YqnCache};
+  return {local,sync,tabs,windows,windowCreates,alarms,created,removed,sent,changed,installed,activated,attached,focused,bounds,restore,alarmEvent,msg,state,jobSender,flush,cache:context.YqnCache};
 }
 const ids=Array.from({length:8},(_,i)=>'video'+String(i).padStart(6,'0'));
 test('opening a video while its role reply is arriving cannot reapply the pause guard',async()=>{
@@ -222,4 +222,13 @@ test('complete zero-cut plans are cached and skipped on subsequent Watch Later p
   await h.msg({type:'yqn-prepare-list',ids:[ids[0],ids[1]]},h.jobSender());
   assert.equal(h.state().skipped,1);
   assert.equal(h.state().job.videoId,ids[1]);
+});
+test('extension update automatically starts Watch Later refresh when watchLaterPrepare and autoCut are enabled',async()=>{
+  const h=await harness({sync:{autoCut:true,cutMessaging:true,watchLaterPrepare:true}});
+  assert.equal(h.created.length,0);
+  h.installed.fire({reason:'install'});await h.flush();
+  assert.equal(h.created.length,0,'Initial install does not unexpectedly open background window');
+  h.installed.fire({reason:'update'});await h.flush();
+  assert.equal(h.state().running,true);
+  assert.equal(h.state().job.kind,'playlist');
 });

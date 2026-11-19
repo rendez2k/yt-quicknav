@@ -3990,7 +3990,7 @@
     for (const [k, v] of sbPrefetchCache) {
       if (now - v.ts >= 30000) sbPrefetchCache.delete(k);
     }
-    if (sbPrefetchCache.size >= 16) {
+    if (sbPrefetchCache.size >= 64) {
       const oldest = sbPrefetchCache.keys().next().value;
       if (oldest) sbPrefetchCache.delete(oldest);
     }
@@ -4091,12 +4091,13 @@
     const nodes = root.querySelectorAll(
       "ytd-thumbnail-overlay-time-status-renderer #text, " +
       "ytd-thumbnail-overlay-time-status-renderer, " +
+      "yt-thumbnail-overlay-badge-view-model .yt-badge-shape__text, " +
       "badge-shape .yt-badge-shape__text, " +
       ".yt-badge-shape__text, " +
       "[data-yqn-duration]"
     );
     for (const n of nodes) {
-      const txt = String(n.textContent || "").trim();
+      const txt = String(n.textContent || "").replace(/\s+/g, "").trim();
       if (TS_RE.test(txt)) {
         const sec = parseTimestamp(txt);
         if (sec > 0) return sec;
@@ -4105,10 +4106,36 @@
     return 0;
   }
 
+  const THUMB_MEM_TTL = 15 * 60 * 1000;
+  const THUMB_FAIL_COOLDOWN = 60 * 1000;
+  const THUMB_PREFETCH_CONCURRENCY = 3;
+  const thumbFailUntil = new Map();
+  const thumbPrefetchQueue = [];
+  const thumbPrefetchQueued = new Set();
+  const thumbPrefetchInFlight = new Set();
+  let thumbPrefetchWorkers = 0;
   let cachedThumbPlans = null;
   let cachedThumbLoadTask = null;
   let cachedThumbPaintTimer = null;
   let cachedThumbFollowupTimer = null;
+
+  function isHiddenPrepTab() {
+    if (globalThis.YqnPreparation?.role && !globalThis.YqnPreparation.viewing) return true;
+    try {
+      if (!globalThis.YqnPreparation?.role && new URL(location.href).searchParams.has("yqn_prepare")) return true;
+    } catch {}
+    return false;
+  }
+
+  function isThumbNearViewport(target, marginTop = 180, marginBottom = 380) {
+    const el = target?.thumbHost || target?.card;
+    if (!el || !el.isConnected || typeof el.getBoundingClientRect !== "function") return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 16 || rect.height < 16) return false;
+    const viewH = window.innerHeight || document.documentElement?.clientHeight || 900;
+    const viewW = window.innerWidth || document.documentElement?.clientWidth || 1280;
+    return rect.bottom >= -marginTop && rect.top <= viewH + marginBottom && rect.right >= -80 && rect.left <= viewW + 80;
+  }
 
   async function ensureCachedThumbPlans() {
     if (cachedThumbPlans !== null) return cachedThumbPlans;
@@ -4157,10 +4184,23 @@
     );
   }
 
+  function fallbackLegacySegments(hit, now = Date.now()) {
+    if (!hit || !Array.isArray(hit.segments) || now - hit.ts >= CUT_CACHE_TTL) return null;
+    const bounded = hit.segments.filter(
+      (s) =>
+        s &&
+        Number.isFinite(+s.start) &&
+        Number.isFinite(+s.end) &&
+        +s.end > +s.start &&
+        (s.sponsor || s.source === "sponsorblock" || +s.end - +s.start <= 135)
+    );
+    return bounded.length ? bounded : null;
+  }
+
   async function resolveThumbBadgeData(vid) {
     const now = Date.now();
     const cached = thumbBadgeCache.get(vid);
-    if (cached && now - cached.ts < 300000) return cached.data;
+    if (cached && now - cached.ts < THUMB_MEM_TTL) return cached.data;
     let data = null;
     const planCache = await ensureCachedThumbPlans();
     const hit = planCache?.[vid];
@@ -4170,6 +4210,15 @@
         poiHighlights: hit.info?.poiHighlights || poiCache.get(vid) || [],
         prepared: true,
       };
+    } else {
+      const legacySegs = fallbackLegacySegments(hit, now);
+      if (legacySegs) {
+        data = {
+          segments: legacySegs,
+          poiHighlights: hit.info?.poiHighlights || poiCache.get(vid) || [],
+          prepared: false,
+        };
+      }
     }
     if (!data && settings.cutMessaging !== false) {
       try {
@@ -4184,7 +4233,7 @@
       }
     }
     if (data) {
-      if (thumbBadgeCache.size >= 120 && !thumbBadgeCache.has(vid)) {
+      if (thumbBadgeCache.size >= 300 && !thumbBadgeCache.has(vid)) {
         const oldest = thumbBadgeCache.keys().next().value;
         if (oldest) thumbBadgeCache.delete(oldest);
       }
@@ -4218,43 +4267,144 @@
     badge.dataset.vid = vid;
     badge.dataset.prepared = raw.prepared ? "1" : "0";
     badge.dataset.hasDur = durationSec > 0 ? "1" : "0";
+    badge.dataset.rate = String(settings.speedRate || 3);
     badge.textContent = badgeInfo.label;
     badge.title = badgeInfo.title;
   }
 
+  function paintAllMatchingThumbs(vid, raw) {
+    const anchors = document.querySelectorAll?.('a[href*="/watch"]');
+    if (!anchors || !anchors.length) return;
+    const seen = new Set();
+    for (const a of anchors) {
+      const t = extractThumbTarget(a);
+      if (!t || t.vid !== vid || seen.has(t.thumbHost)) continue;
+      seen.add(t.thumbHost);
+      paintThumbBadge(t.card, t.thumbHost, vid, raw);
+    }
+  }
+
+  function pumpThumbPrefetchQueue() {
+    while (
+      thumbPrefetchWorkers < THUMB_PREFETCH_CONCURRENCY &&
+      thumbPrefetchQueue.length > 0 &&
+      alive() &&
+      settings.showThumbBadges !== false &&
+      settings.cutMessaging !== false &&
+      !isHiddenPrepTab()
+    ) {
+      const next = thumbPrefetchQueue.shift();
+      if (!next) break;
+      thumbPrefetchQueued.delete(next.vid);
+      if (thumbPrefetchInFlight.has(next.vid)) continue;
+      if (!isThumbNearViewport(next, 320, 560)) continue;
+      const now = Date.now();
+      const mem = thumbBadgeCache.get(next.vid);
+      if (mem && now - mem.ts < THUMB_MEM_TTL) {
+        paintThumbBadge(next.card, next.thumbHost, next.vid, mem.data);
+        continue;
+      }
+      thumbPrefetchInFlight.add(next.vid);
+      thumbPrefetchWorkers++;
+      (async () => {
+        try {
+          const raw = await resolveThumbBadgeData(next.vid);
+          if (!raw) {
+            thumbFailUntil.set(next.vid, Date.now() + THUMB_FAIL_COOLDOWN);
+          } else if (alive() && settings.showThumbBadges !== false) {
+            thumbFailUntil.delete(next.vid);
+            paintAllMatchingThumbs(next.vid, raw);
+          }
+        } finally {
+          thumbPrefetchInFlight.delete(next.vid);
+          thumbPrefetchWorkers = Math.max(0, thumbPrefetchWorkers - 1);
+          if (thumbPrefetchQueue.length > 0) {
+            setTimeout(pumpThumbPrefetchQueue, 35);
+          }
+        }
+      })();
+    }
+  }
+
   async function paintCachedThumbBadges() {
-    if (!alive() || settings.showThumbBadges === false) return;
-    if (globalThis.YqnPreparation?.role && !globalThis.YqnPreparation.viewing) return;
+    if (!alive() || settings.showThumbBadges === false || isHiddenPrepTab()) return;
     const anchors = document.querySelectorAll?.('a[href*="/watch"]');
     if (!anchors || !anchors.length) return;
     const cache = await ensureCachedThumbPlans();
-    if (!cache || !alive() || settings.showThumbBadges === false) return;
+    if (!cache || !alive() || settings.showThumbBadges === false || isHiddenPrepTab()) return;
     const now = Date.now();
+    const rateTag = String(settings.speedRate || 3);
     const seenHosts = new Set();
     for (const anchor of anchors) {
       const target = extractThumbTarget(anchor);
       if (!target || seenHosts.has(target.thumbHost)) continue;
       seenHosts.add(target.thumbHost);
-      const hit = cache[target.vid];
-      if (!isFreshPlanHit(hit, now)) continue;
       const existing = target.thumbHost.querySelector?.(".yqn-thumb-badge");
-      if (existing && existing.dataset?.vid === target.vid && existing.dataset?.prepared === "1") {
-        if (existing.dataset?.hasDur === "1") continue;
-        const durNow = parseThumbDuration(target.card) || parseThumbDuration(target.thumbHost);
-        if (!durNow) continue;
+      const hit = cache[target.vid];
+      if (isFreshPlanHit(hit, now)) {
+        if (
+          existing &&
+          existing.dataset?.vid === target.vid &&
+          existing.dataset?.prepared === "1" &&
+          existing.dataset?.rate === rateTag
+        ) {
+          if (existing.dataset?.hasDur === "1") continue;
+          const durNow = parseThumbDuration(target.card) || parseThumbDuration(target.thumbHost);
+          if (!durNow) continue;
+        }
+        const raw = {
+          segments: hit.segments,
+          poiHighlights: hit.info?.poiHighlights || poiCache.get(target.vid) || [],
+          prepared: true,
+        };
+        if (thumbBadgeCache.size >= 300 && !thumbBadgeCache.has(target.vid)) {
+          const oldest = thumbBadgeCache.keys().next().value;
+          if (oldest) thumbBadgeCache.delete(oldest);
+        }
+        thumbBadgeCache.set(target.vid, { ts: now, data: raw });
+        paintThumbBadge(target.card, target.thumbHost, target.vid, raw);
+        continue;
       }
-      const raw = {
-        segments: hit.segments,
-        poiHighlights: hit.info?.poiHighlights || poiCache.get(target.vid) || [],
-        prepared: true,
-      };
-      if (thumbBadgeCache.size >= 120 && !thumbBadgeCache.has(target.vid)) {
-        const oldest = thumbBadgeCache.keys().next().value;
-        if (oldest) thumbBadgeCache.delete(oldest);
+
+      const legacySegs = fallbackLegacySegments(hit, now);
+      if (legacySegs) {
+        const rawLegacy = {
+          segments: legacySegs,
+          poiHighlights: hit.info?.poiHighlights || poiCache.get(target.vid) || [],
+          prepared: false,
+        };
+        if (thumbBadgeCache.size >= 300 && !thumbBadgeCache.has(target.vid)) {
+          const oldest = thumbBadgeCache.keys().next().value;
+          if (oldest) thumbBadgeCache.delete(oldest);
+        }
+        thumbBadgeCache.set(target.vid, { ts: now, data: rawLegacy });
+        paintThumbBadge(target.card, target.thumbHost, target.vid, rawLegacy);
+        continue;
       }
-      thumbBadgeCache.set(target.vid, { ts: now, data: raw });
-      paintThumbBadge(target.card, target.thumbHost, target.vid, raw);
+
+      if (settings.cutMessaging === false || !isThumbNearViewport(target)) continue;
+      const mem = thumbBadgeCache.get(target.vid);
+      if (mem && now - mem.ts < THUMB_MEM_TTL) {
+        if (
+          !existing ||
+          existing.dataset?.vid !== target.vid ||
+          existing.dataset?.rate !== rateTag ||
+          (existing.dataset?.hasDur === "0" && (parseThumbDuration(target.card) || parseThumbDuration(target.thumbHost)) > 0)
+        ) {
+          paintThumbBadge(target.card, target.thumbHost, target.vid, mem.data);
+        }
+        continue;
+      }
+      if (now < (thumbFailUntil.get(target.vid) || 0)) continue;
+      if (thumbPrefetchInFlight.has(target.vid) || thumbPrefetchQueued.has(target.vid)) continue;
+      if (thumbPrefetchQueue.length >= 40) {
+        const dropped = thumbPrefetchQueue.shift();
+        if (dropped) thumbPrefetchQueued.delete(dropped.vid);
+      }
+      thumbPrefetchQueued.add(target.vid);
+      thumbPrefetchQueue.push(target);
     }
+    if (thumbPrefetchQueue.length > 0) pumpThumbPrefetchQueue();
   }
 
   function scheduleCachedThumbPaint(delayMs = 120) {
@@ -4284,7 +4434,10 @@
     (e) => {
       if (!alive() || settings.showThumbBadges === false) return;
       if (e.target?.closest?.("#yqn-quick-bar, #yqn-cut-panel, #yqn-tldr-panel, #yqn-tools, #movie_player")) return;
-      const target = extractThumbTarget(e.target?.closest?.('a[href*="/watch"]'));
+      const anchor =
+        e.target?.closest?.('a[href*="/watch"]') ||
+        e.target?.closest?.(THUMB_CARD_SELECTOR)?.querySelector?.('a[href*="/watch"]');
+      const target = extractThumbTarget(anchor);
       if (!target) return;
       const { card, thumbHost, vid } = target;
       const existing = thumbHost.querySelector?.(".yqn-thumb-badge");
@@ -4297,10 +4450,11 @@
         vid,
         timer: setTimeout(async () => {
           if (thumbHoverState === state) thumbHoverState.timer = null;
+          thumbFailUntil.delete(vid);
           const raw = await resolveThumbBadgeData(vid);
           if (!raw || !alive() || settings.showThumbBadges === false) return;
-          paintThumbBadge(card, thumbHost, vid, raw);
-        }, 180),
+          paintAllMatchingThumbs(vid, raw);
+        }, 160),
       };
       thumbHoverState = state;
     },
@@ -5783,7 +5937,7 @@
         injectBar();
         updatePlaybackStatus();
       }
-      if ("showThumbBadges" in changes) {
+      if ("showThumbBadges" in changes || "speedRate" in changes || "cutMessaging" in changes) {
         if (settings.showThumbBadges === false) {
           document.querySelectorAll?.(".yqn-thumb-badge").forEach((el) => el.remove());
         } else {
@@ -5957,6 +6111,7 @@
         void paintCachedThumbBadges();
         return;
       }
+      void paintCachedThumbBadges();
       if (!Object.keys(settings).some(k=>k.startsWith("show")&&settings[k])) return;
       const bar=document.getElementById(BAR_ID);
       if (!bar || !bar.getClientRects().length) run();

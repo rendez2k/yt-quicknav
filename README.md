@@ -1,5 +1,10 @@
 # YouTube Quick Nav + Cinema
 
+## Automatic viewport estimated-runtime badges (`→ mm:ss` without hovering) & Watch Later update refresh — 1.46.1 (19 November 2026)
+
+- **Automatic estimated shorter times on visible Watch Later, playlist & feed thumbnails (no hover required):** Visible thumbnails in Watch Later, playlists, Home, Subscriptions, Search, and Watch sidebars now automatically resolve SponsorBlock runtime estimates (`→ 9:06`) through a polite bounded viewport queue (`3` concurrent hash-prefix requests) — no need to mouse over every row individually.
+- **Preserves bounded cached runtime estimates & auto-refreshes Watch Later on update:** Sanitizes pre-`v2` cached entries (`<= 135s` non-sponsor segments) so valid `→ mm:ss` labels stay visible before re-preparation completes, and automatically triggers Watch Later background preparation on extension updates when enabled.
+
 ## Smarter speed-through selection on long videos (duration-scaled valleys, passive caption verification & WPM tempering) — 1.46.0 (18 November 2026)
 
 - **No more multi-minute runaway heatmap speed-throughs on 20m–2h+ videos:** Replaces fixed `3s–5s` 100-bucket thresholds and the `Quick watch` below-median bug (`speedK = 1.0`, which sped through ~50% of steady talks) with duration-scaled valley detection (`cutsFromHeatmap`). Single noisy `36s–72s` buckets and multi-minute non-viral discussion chapters are kept at `1×`, chapter-click replay spikes are despiked so post-heading explanations aren't dragged below baseline, and total unverified heatmap cuts are capped.
@@ -633,7 +638,7 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 
 ## Packaging for a friend (no keys shared)
 
-Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.46.0.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
+Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.46.1.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
 
 ## Development checks
 
