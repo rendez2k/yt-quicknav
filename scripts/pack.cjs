@@ -21,6 +21,7 @@ const RUNTIME_FILES = [
   'ai-client.js',
   'analysis-engine.js',
   'cut-controls.js',
+  'signals.js',
   'plan-cache.js',
   'preparation.js',
   'prepare-worker.js',

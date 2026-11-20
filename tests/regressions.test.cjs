@@ -23,6 +23,7 @@ function harness() {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'topics.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'analysis-engine.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'cut-controls.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'signals.js'), 'utf8'), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'video-tools-model.js'), 'utf8'), context);
   context.YqnAI={request:(url,options,id,transport)=>transport(url,options)};
   const end = source.indexOf('  loadSettings().then(');
@@ -36,6 +37,8 @@ function harness() {
     getCachedPlan = async () => null;
     setCachedPlan = () => seen.saved++;
     removeCutMarkers = () => {};
+    requestVideoExtras = async () => ({});
+    decodeStoryboard = async () => ({ ok: false, error: 'no storyboard in tests' });
     renderCutPanelIfOpen = () => {};
     setCutTooltip = () => {};
     toast = (msg) => { seen.toasts.push(msg); };
@@ -51,6 +54,10 @@ function harness() {
       readTranscriptSegments,
       setProxy(fn) { proxyFetch=fn; },
       setPageData(fn) { requestAutocutData = fn; },
+      setExtras(fn) { requestVideoExtras = fn; },
+      setStoryboard(fn) { decodeStoryboard = fn; },
+      setChannel(id) { currentChannel = id ? { id, name: 'Test Channel' } : null; },
+      setLocalRead(fn) { readLocal = fn; },
       setCategoryFn(fn) { getVideoCategory = fn; },
       setLastMeta(meta) { lastVideoMeta = meta; },
       setSettings(p) { Object.assign(settings,p); },
@@ -1141,4 +1148,55 @@ test('v1.46.2: Thorough 0-checked fallback keeps heatmap/SponsorBlock speedups, 
   } finally {
     clearInterval(keepAlive);
   }
+});
+
+test('free signals: creator chapters, channel memory, comments and storyboard stillness feed the plan; silent demos keep a 2× cap', async () => {
+  const { api, context } = harness();
+  api.setSettings({ cutMessaging: false, cutBoring: false, autoCutPlus: false, aiHighlights: false, jevCuts: false,
+    thoroughAnalysis: false, chapterCuts: true, channelMemory: true, commentSignals: true, visualCheck: true, visualAI: true });
+  api.setChannel('UCchan');
+  const pitch = 'if you want to go deeper join my community hub where members get weekly live calls templates and early access to every project file ' +
+    'it is the best way to support the channel and the link is in the description so go check it out today and i will see you inside';
+  const pw = pitch.split(' ');
+  const pitchLines = (at) => Array.from({ length: Math.ceil(pw.length / 6) }, (_, k) => ({ start: at + k * 3, text: pw.slice(k * 6, k * 6 + 6).join(' ') }));
+  const talk = (a, b, seed) => Array.from({ length: Math.floor((b - a) / 3) }, (_, k) => ({ start: a + k * 3, text: `${seed} part ${k} explains wiring ${k * 7} and soldering ${k * 11}` }));
+  // Another video of this channel already had the pitch cut.
+  const memory = context.YqnSignals.rememberSpans({ channels: {} }, 'UCchan', 'oldVideo01',
+    context.YqnSignals.memorableSpans([{ start: 0, end: 30, action: 'skip', sponsor: true, kind: 'sponsor', reason: 'AI: community pitch', source: 'ai' }],
+      [...pitchLines(0), ...talk(30, 60, 'old')], 'oldVideo01'));
+  api.setLocalRead(async () => ({ yqnChannelMemoryV1: memory }));
+  const transcript = [...talk(0, 120, 'intro'), ...talk(120, 300, 'main'), ...pitchLines(300), ...talk(330, 400, 'more'), ...talk(460, 600, 'end')];
+  api.setPageData(async () => ({ duration: 600, heatmap: [], transcript,
+    chapters: [{ start: 0, title: 'Intro', source: 'youtube' }, { start: 60, title: 'Main', source: 'youtube' },
+      { start: 200, title: 'Sponsor: Acme', source: 'youtube' }, { start: 240, title: 'More', source: 'youtube' }] }));
+  api.setExtras(async () => ({ comments: [{ text: 'skip to 0:45', likes: 40 }, { text: 'sponsor 8:00-8:20', likes: 0 }],
+    storyboard: 'https://i.ytimg.com/sb/videoAAAAAA/storyboard3_L$L/$N.jpg?sqp=x|80#45#120#10#10#5000#M$M#rs$A' }));
+  // Frozen frames from 400–460s, where nobody speaks.
+  api.setStoryboard(async (level, mode) => mode === 'signatures'
+    ? { ok: true, signatures: Array.from({ length: level.count }, (_, i) => Array.from({ length: 16 }, () => (i >= 80 && i < 92 ? 90 : (i * 37) % 200))) }
+    : { ok: false });
+  const result = await api.realBuildCutPlan('videoAAAAAA', () => true, () => {});
+  const segs = JSON.parse(JSON.stringify(result.segments));
+  const at = (t) => segs.find((s) => s.start <= t && s.end > t);
+  assert.equal(at(220)?.source, 'chapters');
+  assert.equal(at(220)?.action, 'skip');
+  assert.equal(at(310)?.source, 'channel-memory');
+  assert.equal(at(310)?.action, 'skip');
+  assert.equal(at(485)?.source, 'comments');
+  assert.equal(at(30)?.source, 'comments', 'a well-liked "skip to" outranks the creator\'s speed-only Intro label');
+  assert.equal(at(30)?.action, 'skip');
+  assert.equal(at(430)?.source, 'visual');
+  assert.equal(at(430)?.action, 'speed');
+  const info = result.info;
+  assert.equal(info.chapterCuts, 2, 'Intro (speed) and Sponsor (skip) chapters');
+  assert.equal(info.memoryCuts, 1);
+  assert.equal(info.commentsRead, 2);
+  assert.equal(info.visualCuts, 1);
+
+  const capped = api.normalizeSegments([
+    { start: 0, end: 100, action: 'speed', reason: 'low replays', source: 'heatmap' },
+    { start: 20, end: 60, action: 'speed', reason: 'silent demo', source: 'visual', rateCap: 2 },
+  ], 100);
+  assert.deepEqual(JSON.parse(JSON.stringify(capped)).map((s) => [s.start, s.end, s.rateCap ?? null]), [[0, 20, null], [20, 60, 2], [60, 100, null]]);
+  assert.equal(context.YqnControls.resolveSpeedRate({ action: 'speed', start: 0, end: 30, rateCap: 2 }, 1, 3), 2);
 });

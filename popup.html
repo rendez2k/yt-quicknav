@@ -89,7 +89,7 @@
         background: var(--warn-bg); color: var(--warn-fg);
         font-size: 11.5px; line-height: 1.45;
       }
-      .costwarn[hidden] { display: none; }
+      .costwarn[hidden], .costwarn button.mini[hidden] { display: none; }
       .costwarn button.mini { display: block; margin-top: 6px; }
       .keystatus.ok { color: var(--ok); }
       .keystatus.err { color: var(--err); }
@@ -431,6 +431,22 @@
       <input type="checkbox" id="cutSilence" />
     </div>
     <div class="row sub">
+      <label for="chapterCuts" title="Skips chapters the creator named Sponsor, Ad, Merch, Patreon or Shout-outs, and speeds through ones named Intro, Outro or Recap">📑 Use creator chapter names</label>
+      <input type="checkbox" id="chapterCuts" />
+    </div>
+    <div class="row sub">
+      <label for="channelMemory" title="Remembers the wording of sponsor reads, pitches and intros cut on a channel, and cuts them when the channel repeats them. Stored only in this browser.">🧠 Remember each channel's repeated pitches</label>
+      <input type="checkbox" id="channelMemory" />
+    </div>
+    <div class="row sub">
+      <label for="commentSignals" title="Reads top comments for sponsor time ranges and 'video starts at' times. A single comment only speeds up; agreement skips.">💬 Use timestamps from top comments</label>
+      <input type="checkbox" id="commentSignals" />
+    </div>
+    <div class="row sub">
+      <label for="visualCheck" title="Uses YouTube's seek-preview thumbnails to find frozen screens with no talking (loading bars, render waits, held title cards)">🖼️ Speed up frozen, silent screens</label>
+      <input type="checkbox" id="visualCheck" />
+    </div>
+    <div class="row sub">
       <label for="speedOnly" title="Sponsors, self-promo and subscribe reminders are still cut outright">🐇 Speed only (sponsors still cut)</label>
       <input type="checkbox" id="speedOnly" />
     </div>
@@ -472,6 +488,10 @@
       <button type="button" id="useCheapModel" class="mini">Use Haiku 5.5</button>
     </div>
     <div class="row sub">
+      <label for="visualAI" title="With AI highlights on: shows Claude a few tiny preview frames from stretches with no talking whose picture keeps changing, to tell a loading screen or B-roll from a demo worth seeing. Costs a fraction of a cent per video.">👁️ Let Claude check silent stretches</label>
+      <input type="checkbox" id="visualAI" />
+    </div>
+    <div class="row sub">
       <label for="jevCuts" title="TypeSafe's Jev model gives each ~45s section a fast keep/speed/skip verdict in one call — no waiting on a full AI analysis">⚡ Jev fast cuts (TypeSafe)</label>
       <input type="checkbox" id="jevCuts" />
     </div>
@@ -492,6 +512,10 @@
     <div class="row">
       <label title="Forget every manual Ignore and every music/short override">♻️ Ignored videos</label>
       <button type="button" id="clearIgnores" class="mini">Reset list</button>
+    </div>
+    <div class="row">
+      <label title="Forget every channel's remembered pitches and intros">🧠 Channel memory</label>
+      <button type="button" id="clearChannelMemory" class="mini">Forget</button>
     </div>
     <div class="row">
       <label for="debug">🐞 Debug logging (console)</label>

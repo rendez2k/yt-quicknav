@@ -27,6 +27,14 @@ if (clearBtn) {
   });
 }
 
+const forgetBtn = document.getElementById("clearChannelMemory");
+forgetBtn?.addEventListener("click", () => {
+  chrome.storage.local.remove("yqnChannelMemoryV1", () => {
+    forgetBtn.textContent = "Forgotten ✓";
+    setTimeout(() => (forgetBtn.textContent = "Forget"), 1500);
+  });
+});
+
 let applyPopupSettings = null;
 
 const formatCents = (usd) => `${+(usd * 100).toPrecision(2)}¢`;
@@ -39,10 +47,15 @@ function renderCostWarning(settings) {
   const w = YqnToolsModel.modelCostWarning(settings);
   box.hidden = !w;
   if (!w) return;
+  const cheaper = document.getElementById("useCheapModel");
+  if (cheaper) cheaper.hidden = !w.cheaperModel;
   const name = (select?.selectedOptions[0]?.textContent || settings.aiModel).split(" —")[0];
   text.textContent =
-    `⚠ ${name} costs about ${formatCents(w.perVideo)} per 30-minute video — ` +
-    `${w.ratio}× Haiku 5.5 (~${formatCents(w.cheapPerVideo)}). ` +
+    (w.thorough
+      ? `⚠ Thorough analysis on ${name} costs about ${formatCents(w.perVideo)} per 30-minute video — ` +
+        `it reviews every section twice (~30 requests), ${w.ratio}× a standard Haiku 5.5 analysis (~${formatCents(w.cheapPerVideo)}). `
+      : `⚠ ${name} costs about ${formatCents(w.perVideo)} per 30-minute video — ` +
+        `${w.ratio}× Haiku 5.5 (~${formatCents(w.cheapPerVideo)}). `) +
     (w.everyVideo
       ? "Auto-Cut analyses every video you open, so this adds up fast."
       : "Every AI analysis and Watch Later preparation is billed at this rate.") +
@@ -250,7 +263,7 @@ void refreshTimeSaved();
 
 const UPDATE_STORAGE_KEY = "yqnUpdateStatusV1";
 const UPDATE_TTL_MS = 12 * 60 * 60 * 1000;
-const currentExtVersion = chrome.runtime?.getManifest?.()?.version || "1.47.1";
+const currentExtVersion = chrome.runtime?.getManifest?.()?.version || "1.48.0";
 const extVersionEl = document.getElementById("extVersion");
 if (extVersionEl) extVersionEl.textContent = `v${currentExtVersion}`;
 

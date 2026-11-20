@@ -32,6 +32,7 @@ const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:pa
       if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers});
       simulatedAICalls++;
       const data=route.request().postDataJSON(),input=JSON.parse(data.messages[0].content);
+      if(Array.isArray(data.system))data.system=data.system.map(b=>b.text).join('');
       if(data.system?.includes('YQN_VIDEO_QUESTION')) {
         const line=input.lines[0];
         return route.fulfill({headers,json:{usage:{input_tokens:100,output_tokens:30},stop_reason:'end_turn',content:[{type:'text',text:JSON.stringify({status:'supported',answer:'Caption transport check: '+line.text,citations:[{lineId:line.id,quote:line.text}]})}]}});

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Quick Nav + Cinema",
-  "version": "1.47.1",
+  "version": "1.48.0",
   "description": "YouTube quick-access buttons, one-click Like/Watch Later, auto cinema mode, TL;DR summary + highlight reel, and Auto-Cut that skips sponsors and dull parts.",
   "permissions": [
     "storage",
@@ -46,7 +46,8 @@
     "https://www.youtube.com/*",
     "https://sponsor.ajay.app/*",
     "https://api.anthropic.com/*",
-    "https://api.typesafe.ai/*"
+    "https://api.typesafe.ai/*",
+    "https://i.ytimg.com/*"
   ],
   "action": {
     "default_title": "YouTube Quick Nav + Cinema",
@@ -92,6 +93,7 @@
         "topics.js",
         "analysis-engine.js",
         "cut-controls.js",
+        "signals.js",
         "video-tools-model.js",
         "ai-client.js",
         "video-tools.js",
