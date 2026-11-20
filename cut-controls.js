@@ -57,6 +57,11 @@
     cutBoring: true,
     autoCutPlus: false,
     cutSilence: false,
+    chapterCuts: true,
+    channelMemory: true,
+    commentSignals: true,
+    visualCheck: true,
+    visualAI: true,
     speedOnly: false,
     autoIgnoreMusic: true,
     minCutMinutes: 2,
@@ -206,7 +211,7 @@
   function sameCutIdentity(a, b) {
     return !!(a && b && a.action === b.action && a.reason === b.reason &&
       Boolean(a.sponsor) === Boolean(b.sponsor) && a.kind === b.kind &&
-      a.source === b.source && a.evidence === b.evidence);
+      a.source === b.source && a.evidence === b.evidence && a.rateCap === b.rateCap);
   }
   function coalesceMicroGaps(segments) {
     if (!Array.isArray(segments) || segments.length < 2) return Array.isArray(segments) ? segments : [];
@@ -309,6 +314,8 @@
         rate = Math.min(4, Math.round((target + 0.5) * 4) / 4);
       }
     }
+    // A source can cap its own stretch (e.g. a silent demo plays at 2×).
+    if (seg && Number.isFinite(seg.rateCap) && seg.rateCap >= 1) rate = Math.min(rate, seg.rateCap);
     return Math.max(base, rate);
   }
   function effectiveSpeedEnd(seg, segments, leadOutSec = 0.22) {

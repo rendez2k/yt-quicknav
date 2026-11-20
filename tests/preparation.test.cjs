@@ -60,7 +60,7 @@ test('Watch Later reuses one minimised window and muted tab for 15 free videos b
   }
   assert.equal(h.state().running,false);assert.equal(h.state().ready,15);assert.equal(h.state().attempted,15);assert.equal(h.state().skipped,2);assert.equal(h.tabs.size,0);
   assert.equal(h.created.length,1);assert.equal(h.windowCreates.length,1);assert.equal(h.windows.size,1);assert.equal(h.windows.get(1).focused,true);
-  assert.equal(Object.keys(h.local.cutCacheV15).length,15);
+  assert.equal(Object.keys(h.local.cutCacheV16).length,15);
 
   // Paid AI defaults to 5 unless prepareBatchSize is explicitly set.
   const hAi=await harness({sync:{autoCut:true,aiHighlights:true,anthropicKey:'k'}});
@@ -78,7 +78,7 @@ test('Watch Later reuses one minimised window and muted tab for 15 free videos b
 });
 test('existing prepared and open videos are skipped; another tab cannot submit queue work',async()=>{
   const h=await harness();h.tabs.set(1,{id:1,url:'https://www.youtube.com/watch?v='+ids[0],active:true});
-  h.local.cutCacheV15={[ids[1]]:{ts:Date.now(),settingsKey:h.cache.key({...h.cache.defaults,...h.sync}),segments:[{action:'keep'}]}};
+  h.local.cutCacheV16={[ids[1]]:{ts:Date.now(),settingsKey:h.cache.key({...h.cache.defaults,...h.sync}),segments:[{action:'keep'}]}};
   await h.msg({type:'yqn-prepare-start'});
   await h.msg({type:'yqn-prepare-list',ids},{id:'test',tab:h.tabs.get(1)});assert.equal(h.state().job.kind,'playlist');
   await h.msg({type:'yqn-prepare-list',ids},h.jobSender());assert.equal(h.state().job.videoId,ids[2]);

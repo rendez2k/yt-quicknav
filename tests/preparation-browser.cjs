@@ -21,6 +21,7 @@ test('Watch Later background preparation, cached playback, own-store skip, budge
       const headers={'access-control-allow-origin':'*','access-control-allow-headers':'*'};
       if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers});
       requests++;const q=route.request().postDataJSON(),input=JSON.parse(q.messages[0].content);
+      if(Array.isArray(q.system))q.system=q.system.map(b=>b.text).join('');
       assert.match(q.system,/own shop, store, import business/);await new Promise(r=>setTimeout(r,delay));
       await route.fulfill({headers,json:{stop_reason:'end_turn',usage:{input_tokens:200,output_tokens:200},content:[{type:'text',text:JSON.stringify({sections:input.lines.map(l=>({firstLine:l.id,lastLine:l.id,
         action:l.id===1?'skip':l.id===3?'speed':'keep',kind:l.id===1?'sponsor':l.id===3?'repetition':'explanation',certainty:'high',evidence:l.text,reason:l.id===1?'Own store promotion':l.id===3?'Repeated detail':'Review facts'})),summary:'A review',takeaways:[],chapters:[],mentions:[]})}]}}).catch(()=>{});
@@ -96,7 +97,7 @@ test('Watch Later background preparation, cached playback, own-store skip, budge
       await watch.evaluate(()=>document.querySelector('video').currentTime=45);await watch.waitForFunction(()=>document.querySelector('video').playbackRate===1.5);
     });
     await t.test('a spending limit stops preparation before any paid request',async()=>{
-      await worker.evaluate(()=>chrome.storage.local.remove('cutCacheV15'));await worker.evaluate(()=>chrome.storage.sync.set({aiDailyBudget:0.000001}));
+      await worker.evaluate(()=>chrome.storage.local.remove('cutCacheV16'));await worker.evaluate(()=>chrome.storage.sync.set({aiDailyBudget:0.000001}));
       const before=requests;await popup.locator('#prepareNow').click();await until(async()=>(await state())?.running);await until(async()=>!(await state())?.running);
       assert.match((await state()).message,/spending limit/);assert.equal(requests,before);assert.equal((await state()).attempted,1);
     });

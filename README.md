@@ -1,5 +1,18 @@
 # YouTube Quick Nav + Cinema
 
+## Free junk detection: creator chapter names, channel memory, comment timestamps & frozen-screen speed-ups; Thorough cost fixes — 1.48.0 (20 November 2026)
+
+- **Creator chapter names (`📑`):** Chapters the creator titled `Sponsor`, `Ad`, `Merch`, `Patreon`, `Shout-outs` or `Subscribe` are skipped, and `Intro`, `Outro`, `Recap` or `Preview` are sped through — no AI, and it works on brand-new videos SponsorBlock hasn't reached. Look-alikes such as `Intro to React` or `Adding sponsors to the database` are not touched; a labelled sponsor chapter over 4 minutes is only sped up.
+- **Channel memory (`🧠`):** Remembers the wording of sponsor reads, pitches and intros cut on a channel, then cuts them the moment that channel repeats them in another video (the recurring "join my community" pitch). Stored as compact hashed fingerprints in this browser only, bounded to 60 channels × 15 videos; **Forget** in the popup clears it.
+- **Comment timestamps (`💬`):** Reads the top comments for sponsor ranges (`sponsor 4:30–5:45`) and "video starts at 1:10" — one comment only speeds up, agreement or a well-liked comment skips — and keeps the moments viewers point to at normal speed. One extra request, only when the page already carries the comments token.
+- **Frozen, silent screens (`🖼️`):** Uses YouTube's seek-preview thumbnails to find stretches where the picture is frozen *and* nobody talks — install bars, render waits, held title cards — and speeds through them. Slides or a still talking head with speech are left alone. With **👁️ Let Claude check silent stretches** (AI highlights on), a few tiny frames from silent stretches whose picture keeps moving go to Claude to tell a loading screen or B-roll (full speed) from a silent demo (played at a gentler `2×`) — a fraction of a cent per video.
+- **Thorough analysis cost:** The popup warning now prices Thorough mode properly — it makes about 30 requests per 30-minute video (roughly `50¢` on Sonnet, `2.5¢` on Haiku 5.5) — and Thorough requests now mark their long shared instructions for prompt caching, so repeats are billed at the cached rate where the model supports it.
+- Cached plans from earlier versions are refreshed once so videos pick up the new signals.
+
+## AI model cost warning in the popup — 1.47.1 (20 November 2026)
+
+- **Warns before an expensive model drains your credits:** With AI highlights on, picking Sonnet 5 / Sonnet 5.5 (about `5¢` per 30-minute video, `20×` Haiku 5.5's `~0.25¢`) or Haiku 4.5 (`10×`) shows an amber notice under **AI model** with the estimated per-video cost, whether Auto-Cut is analysing every video you open, and whether a daily limit is set — plus a one-click **Use Haiku 5.5** button. Estimates come from the same price table as the usage ledger.
+
 ## Vlog / unboxing speed-through tuning, unpunctuated ASR quote matching, B-roll gap speed-ups & clean AI Topics — 1.47.0 (19 November 2026)
 
 - **Speeds through casual unboxing, setup play-by-play & reaction filler:** Teaches both AI passes that routine physical prep narration (cutting boxes/tape, peeling stickers, plugging cables, generic menus, waiting on calibration/prints), excited reaction hype, and chatty setup belong at `2×–3×` `speed` even in Balanced (`Custom`) mode — keeping actual specs, warnings, problems, and finished results/verdicts at `1×`.
@@ -509,6 +522,18 @@ dull parts. Sources (each toggleable in the popup):
   neighbourhood (a rolling median), not the video's single hottest spike — so
   one viral moment doesn't get the rest of the video cut, flat videos are left
   alone, and only genuine dips are trimmed. No third-party service.
+- **📑 Creator chapter names** — skips chapters the creator labelled Sponsor,
+  Ad, Merch, Patreon or Shout-outs and speeds through Intro, Outro, Recap or
+  Preview chapters. Free, and works before SponsorBlock has data.
+- **🧠 Channel memory** — remembers the wording of pitches and intros already
+  cut on a channel and cuts them when the channel repeats them. Local only.
+- **💬 Comment timestamps** — viewer sponsor ranges and "starts at" times from
+  the top comments; frequently cited moments are kept at normal speed.
+- **🖼️ Frozen, silent screens** — speeds through stretches where YouTube's
+  preview thumbnails show a frozen picture and nobody is talking. Optionally
+  (**👁️ Let Claude check silent stretches**), Claude looks at a few tiny frames
+  of moving silent stretches: loading screens and B-roll play fast, silent
+  demos at 2×.
 - **🐇 Speed only (sponsors still cut)** — a mode for the cautious: segments
   that would be skipped play at your speed-through rate instead, so intros and
   tangents flash past but you never miss a frame. The exception is promotions
@@ -625,9 +650,10 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 | `manifest.json` | MV3 manifest, permissions, content script + action popup |
 | `cut-controls.js` | Shared presets, saved section actions and playback savings accounting |
 | `analysis-engine.js` | Thorough chunking, evidence checks, review reconciliation and local correction suggestions |
+| `signals.js` | Free cut signals: creator chapter names, channel memory, comment timestamps and storyboard stillness |
 | `content.js` | Injects the button bar, drives the Watch Later toggle, enables cinema mode |
 | `injected.js` | Page-context helper that calls YouTube's playlist API to add/remove Watch Later |
-| `background.js` | Service worker for SponsorBlock and Jev requests |
+| `background.js` | Service worker for SponsorBlock and Jev requests, and decoding YouTube's preview thumbnails |
 | `content.css` | Styling for the pills and the toast notification |
 | `popup.html` / `popup.js` | Settings popup |
 | `icons/` | Toolbar / store icons (16, 48, 128 px) |
@@ -650,7 +676,7 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 
 ## Packaging for a friend (no keys shared)
 
-Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.47.0.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
+Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.48.0.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
 
 ## Development checks
 

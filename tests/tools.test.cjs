@@ -183,14 +183,14 @@ test('buildBackup and parseBackup round-trip user state while stripping API keys
     'yqnLearningV1:UCfixtureA':{samples:[{videoId:'videoAAAAAA',kind:'intro',action:'keep'}],approved:{intro:'keep'}},
     'yqnCutEditsV1:videoAAAAAA':[{start:10,end:30,action:'keep'}],
     'yqnNotesV1:videoAAAAAA':[{id:'note-1',time:55,text:'Key point'}],
-    cutCacheV15:{videoAAAAAA:{segments:[]}},
+    cutCacheV16:{videoAAAAAA:{segments:[]}},
     yqnUsageV1:{entries:{}},
   };
   const backup=m.buildBackup(syncStore,localStore,defaults);
   const serialized=JSON.stringify(backup);
   assert.ok(!serialized.includes('sk-ant-SECRET'));
   assert.ok(!serialized.includes('ts-SECRET'));
-  assert.equal('cutCacheV15' in backup.local,false);
+  assert.equal('cutCacheV16' in backup.local,false);
   assert.equal('yqnUsageV1' in backup.local,false);
 
   // Inject malicious keys into the JSON before parsing to verify defence-in-depth.
@@ -349,4 +349,29 @@ test('v1.44: compareSemver, parseReleaseUpdate URL allowlisting, and 1-click upd
   const {buildWindowsUpdater,buildUnixUpdater}=require('../scripts/pack.cjs');
   assert.match(buildWindowsUpdater(),/https:\/\/api\.github\.com\/repos\/rendez2k\/yt-quicknav\/releases\/latest/);
   assert.match(buildUnixUpdater(),/https:\/\/api\.github\.com\/repos\/rendez2k\/yt-quicknav\/releases\/latest/);
+});
+test('model cost warning flags expensive models only when AI analysis is on',()=>{
+  const on={aiHighlights:true,autoCut:true,aiDailyBudget:0};
+  const sonnet=m.modelCostWarning({...on,aiModel:'claude-sonnet-5'});
+  assert.equal(sonnet.ratio,20);
+  assert.ok(Math.abs(sonnet.perVideo-0.05)<1e-9 && Math.abs(sonnet.cheapPerVideo-0.0025)<1e-9);
+  assert.equal(sonnet.everyVideo,true);
+  assert.equal(sonnet.noDailyLimit,true);
+  assert.equal(m.modelCostWarning({...on,aiModel:'claude-sonnet-5-5',aiDailyBudget:0.25}).noDailyLimit,false);
+  assert.equal(m.modelCostWarning({...on,aiModel:'claude-haiku-4-5-20251001'}).ratio,10);
+  assert.equal(m.modelCostWarning({...on,aiModel:'claude-haiku-5-5'}),null);
+  assert.equal(m.modelCostWarning({...on,aiModel:'claude-sonnet-5',aiHighlights:false}),null);
+  assert.equal(m.modelCostWarning({...on,aiModel:'unknown-model'}),null);
+  assert.equal(sonnet.thorough,false);
+  assert.equal(sonnet.cheaperModel,true);
+});
+test('model cost warning accounts for Thorough analysis making ~30 requests per video',()=>{
+  const on={aiHighlights:true,autoCut:true,thoroughAnalysis:true};
+  const haiku=m.modelCostWarning({...on,aiModel:'claude-haiku-5-5'});
+  assert.equal(haiku.thorough,true);
+  assert.equal(haiku.ratio,10);
+  assert.equal(haiku.cheaperModel,false,'already the cheapest model: no switch button');
+  const sonnet=m.modelCostWarning({...on,aiModel:'claude-sonnet-5-5'});
+  assert.ok(Math.abs(sonnet.perVideo-0.498)<1e-9,String(sonnet.perVideo));
+  assert.equal(sonnet.ratio,199);
 });

@@ -26,6 +26,26 @@
     // This deliberately overestimates normal text. It is not a provider invoice cap.
     return price(model,{input_tokens:number(bytes)+4096,output_tokens:number(output)},jevRate);
   }
+  // A typical 30-minute video analysis: ~10k transcript tokens in, ~3k out.
+  const TYPICAL_ANALYSIS={input_tokens:10000,output_tokens:3000};
+  // Thorough review of the same video, measured with the analysis engine:
+  // 15 sections x 2 passes = 30 requests of ~3.8k tokens in / ~0.9k out.
+  // Priced per request: long-prompt rates depend on each request's size.
+  const THOROUGH_REQUESTS=30, THOROUGH_REQUEST={input_tokens:3800,output_tokens:900};
+  // Popup warning for settings that make every automatic analysis costly:
+  // an expensive model, Thorough analysis, or both. Null when AI analysis is
+  // off or the cost is within 5x of a standard Haiku 5.5 analysis.
+  function modelCostWarning(settings) {
+    if (!settings?.aiHighlights) return null;
+    const thorough=!!settings.thoroughAnalysis;
+    const cheap=price('claude-haiku-5-5',TYPICAL_ANALYSIS);
+    const one=price(settings.aiModel,thorough?THOROUGH_REQUEST:TYPICAL_ANALYSIS);
+    const perVideo=one===null?null:thorough?Math.round(one*THOROUGH_REQUESTS*1e9)/1e9:one;
+    if (perVideo===null || perVideo<cheap*5) return null;
+    return {perVideo,cheapPerVideo:cheap,ratio:Math.round(perVideo/cheap),thorough,
+      cheaperModel:settings.aiModel!=='claude-haiku-5-5',
+      everyVideo:!!settings.autoCut,noDailyLimit:!(Number(settings.aiDailyBudget)>0)};
+  }
   function totals(ledger, videoId, today = day()) {
     const entries=Object.values(ledger?.entries || {});
     const sum=rows=>({usd:rows.reduce((s,r)=>s+number(r.usd),0),calls:rows.length,
@@ -229,7 +249,7 @@
     ['filler','Tangent / filler'],
     ['poi_highlight','Highlight (point of interest)'],
   ];
-  function sponsorBlockPayload({videoId,start,end,duration,category='sponsor',userId,version='1.47.0'}={}) {
+  function sponsorBlockPayload({videoId,start,end,duration,category='sponsor',userId,version='1.48.0'}={}) {
     if (typeof videoId!=='string'||!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new Error('This video does not have a valid 11-character YouTube video ID.');
     if (!sbCategories.some(([id])=>id===category)) throw new Error('Choose a valid SponsorBlock category.');
     if (typeof userId!=='string'||userId.trim().length<16) throw new Error('Local SponsorBlock submitter ID could not be generated.');
@@ -252,7 +272,7 @@
       endTime:Math.round(r.end*1000)/1000,
       category,
       userID:userId.trim(),
-      userAgent:`YouTubeQuickNav/${String(version||'1.47.0').replace(/[^\w.-]/g,'')}`,
+      userAgent:`YouTubeQuickNav/${String(version||'1.48.0').replace(/[^\w.-]/g,'')}`,
       actionType:isPoi?'poi':'skip',
     };
     if (Number.isFinite(duration)&&duration>0) out.videoDuration=Math.round(duration*1000)/1000;
@@ -516,5 +536,5 @@
     const summary=(firstBullet||String(releaseJson.name||'').trim()).slice(0,140);
     return {valid:true,hasUpdate,currentVersion:cleanCur,latestVersion,zipUrl,releaseUrl,summary};
   }
-  globalThis.YqnToolsModel={GITHUB_REPO,compareSemver,parseReleaseUpdate,day,rates,price,estimate,totals,signature,parseTime,range,evidence,answerSchema,validateAnswer,notesMarkdown,normalizeCaptionLines,findActiveCaptionIndex,formatTranscriptQuote,searchTranscript,sbCategories,sponsorBlockPayload,searchAllNotes,allNotesMarkdown,buildBackup,parseBackup,diagnosis};
+  globalThis.YqnToolsModel={GITHUB_REPO,compareSemver,parseReleaseUpdate,day,rates,price,estimate,modelCostWarning,totals,signature,parseTime,range,evidence,answerSchema,validateAnswer,notesMarkdown,normalizeCaptionLines,findActiveCaptionIndex,formatTranscriptQuote,searchTranscript,sbCategories,sponsorBlockPayload,searchAllNotes,allNotesMarkdown,buildBackup,parseBackup,diagnosis};
 })();

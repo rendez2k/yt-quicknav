@@ -11,10 +11,14 @@ importScripts("video-tools-model.js", "usage-ledger.js", "plan-cache.js", "prepa
 const ALLOWED_HOSTS = ["https://api.typesafe.ai/", "https://api.anthropic.com/", "https://sponsor.ajay.app/"];
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || msg.type !== "yqn-proxy-fetch") return;
+  if (!msg || (msg.type !== "yqn-proxy-fetch" && msg.type !== "yqn-storyboard")) return;
   if (!sender || sender.id !== chrome.runtime.id) {
     sendResponse({ ok: false, error: "unauthorized sender" });
     return;
+  }
+  if (msg.type === "yqn-storyboard") {
+    decodeStoryboard(msg).then(sendResponse, (e) => sendResponse({ ok: false, error: (e && e.message) || "decode failed" }));
+    return true;
   }
 
   let url;
@@ -59,6 +63,78 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   })();
   return true; // response is async
 });
+
+/* Storyboard decoding — YouTube's seek-preview sprite sheets on i.ytimg.com
+ * carry no CORS headers, so pixels can only be read here. "signatures" mode
+ * returns a 16×9 greyscale fingerprint per frame (for local stillness
+ * checks); "frames" mode returns a few small JPEG frames for the optional
+ * Claude look at silent stretches. */
+const STORYBOARD_PREFIX = "https://i.ytimg.com/sb/";
+
+async function loadSheet(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, { signal: controller.signal, redirect: "error", credentials: "omit" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await createImageBitmap(await res.blob());
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function decodeStoryboard(msg) {
+  const cols = Math.floor(msg.cols), rows = Math.floor(msg.rows), count = Math.floor(msg.count);
+  const w = Math.floor(msg.width), h = Math.floor(msg.height);
+  const sheets = Array.isArray(msg.sheets) ? msg.sheets.slice(0, 40) : [];
+  if (![cols, rows, count, w, h].every((n) => n > 0 && n <= 2000) || !sheets.length ||
+      !sheets.every((u) => typeof u === "string" && u.startsWith(STORYBOARD_PREFIX))) {
+    return { ok: false, error: "bad storyboard request" };
+  }
+  const perSheet = cols * rows;
+  const cell = (bitmap, index) => {
+    const k = index % perSheet;
+    return [(k % cols) * w, Math.floor(k / cols) * h];
+  };
+  if (msg.mode === "signatures") {
+    const canvas = new OffscreenCanvas(16, 9), ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const signatures = [];
+    for (let j = 0; j < sheets.length && signatures.length < count; j++) {
+      const bitmap = await loadSheet(sheets[j]);
+      for (let k = 0; k < perSheet && signatures.length < count; k++) {
+        const [sx, sy] = cell(bitmap, k);
+        if (sx + w > bitmap.width || sy + h > bitmap.height) break;
+        ctx.drawImage(bitmap, sx, sy, w, h, 0, 0, 16, 9);
+        const px = ctx.getImageData(0, 0, 16, 9).data, sig = new Array(144);
+        for (let p = 0; p < 144; p++) sig[p] = Math.round(0.299 * px[p * 4] + 0.587 * px[p * 4 + 1] + 0.114 * px[p * 4 + 2]);
+        signatures.push(sig);
+      }
+      bitmap.close?.();
+    }
+    return { ok: true, signatures };
+  }
+  if (msg.mode === "frames") {
+    const wanted = [...new Set((msg.frames || []).map(Math.floor).filter((i) => i >= 0 && i < count))].slice(0, 24);
+    const canvas = new OffscreenCanvas(w, h), ctx = canvas.getContext("2d");
+    const frames = {};
+    for (const j of [...new Set(wanted.map((i) => Math.floor(i / perSheet)))]) {
+      if (!sheets[j]) continue;
+      const bitmap = await loadSheet(sheets[j]);
+      for (const i of wanted.filter((i) => Math.floor(i / perSheet) === j)) {
+        const [sx, sy] = cell(bitmap, i);
+        if (sx + w > bitmap.width || sy + h > bitmap.height) continue;
+        ctx.drawImage(bitmap, sx, sy, w, h, 0, 0, w, h);
+        const bytes = new Uint8Array(await (await canvas.convertToBlob({ type: "image/jpeg", quality: 0.75 })).arrayBuffer());
+        let bin = "";
+        for (let b = 0; b < bytes.length; b++) bin += String.fromCharCode(bytes[b]);
+        frames[i] = btoa(bin);
+      }
+      bitmap.close?.();
+    }
+    return { ok: true, frames };
+  }
+  return { ok: false, error: "unknown mode" };
+}
 
 chrome.commands?.onCommand?.addListener((command) => {
   try {

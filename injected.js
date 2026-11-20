@@ -485,6 +485,87 @@
     return native.length ? native : YqnTopics.fromDescription(response?.videoDetails?.shortDescription,duration);
   }
 
+  // Continuation token for the comments section of a watch-next response.
+  function findCommentsToken(data) {
+    let token = null;
+    (function walk(o) {
+      if (token || !o || typeof o !== "object") return;
+      const section = o.itemSectionRenderer;
+      if (section && (section.sectionIdentifier === "comment-item-section" || section.targetId === "comments-section")) {
+        for (const c of section.contents || []) {
+          const t = c?.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token;
+          if (t) { token = t; return; }
+        }
+      }
+      for (const k in o) if (!token) walk(o[k]);
+    })(data);
+    return token;
+  }
+
+  function parseLikeCount(value) {
+    const m = String(value || "").replace(/,/g, "").match(/([\d.]+)\s*([KMB])?/i);
+    if (!m) return 0;
+    return Math.round(parseFloat(m[1]) * ({ k: 1e3, m: 1e6, b: 1e9 }[(m[2] || "").toLowerCase()] || 1)) || 0;
+  }
+
+  // Top-level comments from a comments continuation response. Current
+  // layouts keep text in entity payloads; older ones in commentRenderer.
+  function parseComments(json) {
+    const out = [];
+    for (const m of json?.frameworkUpdates?.entityBatchUpdate?.mutations || []) {
+      const p = m?.payload?.commentEntityPayload;
+      const text = p?.properties?.content?.content;
+      if (typeof text === "string" && text) {
+        out.push({ text: text.slice(0, 2000), likes: parseLikeCount(p.toolbar?.likeCountNotliked ?? p.toolbar?.likeCountA11y) });
+      }
+    }
+    if (!out.length) {
+      (function walk(o) {
+        if (!o || typeof o !== "object" || out.length >= 60) return;
+        const r = o.commentRenderer;
+        if (r) {
+          const text = (r.contentText?.runs || []).map((x) => x.text || "").join("");
+          if (text) out.push({ text: text.slice(0, 2000), likes: parseLikeCount(r.voteCount?.simpleText) });
+          return;
+        }
+        for (const k in o) walk(o[k]);
+      })(json);
+    }
+    return out.slice(0, 60);
+  }
+
+  // Extra, slower Auto-Cut inputs fetched separately so they never delay the
+  // heatmap/transcript: top comments (one InnerTube call) and the
+  // storyboard spec for YouTube's seek-preview thumbnails (no request).
+  async function gatherExtras(videoId, wantComments, wantStoryboard) {
+    const out = { comments: [], storyboard: "" };
+    const generation = navigationGeneration;
+    const current = () => generation === navigationGeneration &&
+      new URLSearchParams(location.search).get("v") === videoId;
+    if (!current()) return out;
+    const pr = window.ytInitialPlayerResponse;
+    const prAny = getLivePlayerResponse(videoId) || (pr?.videoDetails?.videoId === videoId ? pr : null);
+    if (wantStoryboard) out.storyboard = String(prAny?.storyboards?.playerStoryboardSpecRenderer?.spec || "");
+    const apiKey = getCfg("INNERTUBE_API_KEY");
+    const context = getCfg("INNERTUBE_CONTEXT");
+    if (wantComments && apiKey && context) {
+      try {
+        // The page's own watch data carries the token; without it, skip
+        // comments rather than spend another /next request finding it.
+        const token = findCommentsToken(getLiveWatchData(videoId));
+        if (token && current()) {
+          const auth = await buildAuthHeader(ORIGIN).catch(() => null);
+          const res = await innertubeFetch("next", apiKey, auth, { context, continuation: token });
+          const json = await res.json().catch(() => ({}));
+          if (current()) out.comments = parseComments(json);
+        }
+      } catch (e) {
+        out.commentsError = (e && e.message) || "comments unavailable";
+      }
+    }
+    return out;
+  }
+
   // Gather Auto-Cut data (most-replayed heatmap + transcript) for a video.
   // Prefer the player's live data; fall back to page globals then the API.
   async function gatherAutocut(videoId, needHeatmap, needTranscript) {
@@ -877,6 +958,23 @@
           requestId: data.requestId,
           payload,
         },
+        window.location.origin
+      );
+      return;
+    }
+
+    if (data.type === "video-extras") {
+      if (!data.requestId || dataRequests.has(data.requestId)) return;
+      dataRequests.set(data.requestId, true);
+      setTimeout(() => dataRequests.delete(data.requestId), 30000);
+      let payload;
+      try {
+        payload = await gatherExtras(data.videoId, !!data.wantComments, !!data.wantStoryboard);
+      } catch {
+        payload = { comments: [], storyboard: "" };
+      }
+      window.postMessage(
+        { source: "yqn-injected", type: "video-extras", videoId: data.videoId, requestId: data.requestId, payload },
         window.location.origin
       );
       return;
