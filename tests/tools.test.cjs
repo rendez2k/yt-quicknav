@@ -350,3 +350,16 @@ test('v1.44: compareSemver, parseReleaseUpdate URL allowlisting, and 1-click upd
   assert.match(buildWindowsUpdater(),/https:\/\/api\.github\.com\/repos\/rendez2k\/yt-quicknav\/releases\/latest/);
   assert.match(buildUnixUpdater(),/https:\/\/api\.github\.com\/repos\/rendez2k\/yt-quicknav\/releases\/latest/);
 });
+test('model cost warning flags expensive models only when AI analysis is on',()=>{
+  const on={aiHighlights:true,autoCut:true,aiDailyBudget:0};
+  const sonnet=m.modelCostWarning({...on,aiModel:'claude-sonnet-5'});
+  assert.equal(sonnet.ratio,20);
+  assert.ok(Math.abs(sonnet.perVideo-0.05)<1e-9 && Math.abs(sonnet.cheapPerVideo-0.0025)<1e-9);
+  assert.equal(sonnet.everyVideo,true);
+  assert.equal(sonnet.noDailyLimit,true);
+  assert.equal(m.modelCostWarning({...on,aiModel:'claude-sonnet-5-5',aiDailyBudget:0.25}).noDailyLimit,false);
+  assert.equal(m.modelCostWarning({...on,aiModel:'claude-haiku-4-5-20251001'}).ratio,10);
+  assert.equal(m.modelCostWarning({...on,aiModel:'claude-haiku-5-5'}),null);
+  assert.equal(m.modelCostWarning({...on,aiModel:'claude-sonnet-5',aiHighlights:false}),null);
+  assert.equal(m.modelCostWarning({...on,aiModel:'unknown-model'}),null);
+});

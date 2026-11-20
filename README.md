@@ -1,5 +1,9 @@
 # YouTube Quick Nav + Cinema
 
+## AI model cost warning in the popup — 1.47.1 (20 November 2026)
+
+- **Warns before an expensive model drains your credits:** With AI highlights on, picking Sonnet 5 / Sonnet 5.5 (about `5¢` per 30-minute video, `20×` Haiku 5.5's `~0.25¢`) or Haiku 4.5 (`10×`) shows an amber notice under **AI model** with the estimated per-video cost, whether Auto-Cut is analysing every video you open, and whether a daily limit is set — plus a one-click **Use Haiku 5.5** button. Estimates come from the same price table as the usage ledger.
+
 ## Vlog / unboxing speed-through tuning, unpunctuated ASR quote matching, B-roll gap speed-ups & clean AI Topics — 1.47.0 (19 November 2026)
 
 - **Speeds through casual unboxing, setup play-by-play & reaction filler:** Teaches both AI passes that routine physical prep narration (cutting boxes/tape, peeling stickers, plugging cables, generic menus, waiting on calibration/prints), excited reaction hype, and chatty setup belong at `2×–3×` `speed` even in Balanced (`Custom`) mode — keeping actual specs, warnings, problems, and finished results/verdicts at `1×`.
@@ -650,7 +654,7 @@ immediately. Refresh open video tabs after reloading/updating the extension.
 
 ## Packaging for a friend (no keys shared)
 
-Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.47.0.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
+Run `npm run pack` to audit every runtime file for hardcoded secrets, stage `dist/unpacked/`, and build a clean shareable archive at `dist/youtube-quick-nav-v1.47.1.zip` (including `HOW-TO-INSTALL.txt`, `Update-Windows.cmd`, and `Update-Mac-Linux.command`). Your personal API keys, notes, and settings live exclusively in Chrome's browser storage (`chrome.storage`), never in the extension files — and if you also share a settings file via **Export backup (.json)** in the popup, `anthropicKey` and `typesafeKey` are automatically stripped on both export and import.
 
 ## Development checks
 

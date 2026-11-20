@@ -26,6 +26,17 @@
     // This deliberately overestimates normal text. It is not a provider invoice cap.
     return price(model,{input_tokens:number(bytes)+4096,output_tokens:number(output)},jevRate);
   }
+  // A typical 30-minute video analysis: ~10k transcript tokens in, ~3k out.
+  const TYPICAL_ANALYSIS={input_tokens:10000,output_tokens:3000};
+  // Popup warning for a model that makes every automatic analysis costly.
+  // Null when AI analysis is off or the model is within 5x of Haiku 5.5.
+  function modelCostWarning(settings) {
+    if (!settings?.aiHighlights) return null;
+    const cheap=price('claude-haiku-5-5',TYPICAL_ANALYSIS),perVideo=price(settings.aiModel,TYPICAL_ANALYSIS);
+    if (perVideo===null || perVideo<cheap*5) return null;
+    return {perVideo,cheapPerVideo:cheap,ratio:Math.round(perVideo/cheap),
+      everyVideo:!!settings.autoCut,noDailyLimit:!(Number(settings.aiDailyBudget)>0)};
+  }
   function totals(ledger, videoId, today = day()) {
     const entries=Object.values(ledger?.entries || {});
     const sum=rows=>({usd:rows.reduce((s,r)=>s+number(r.usd),0),calls:rows.length,
@@ -229,7 +240,7 @@
     ['filler','Tangent / filler'],
     ['poi_highlight','Highlight (point of interest)'],
   ];
-  function sponsorBlockPayload({videoId,start,end,duration,category='sponsor',userId,version='1.47.0'}={}) {
+  function sponsorBlockPayload({videoId,start,end,duration,category='sponsor',userId,version='1.47.1'}={}) {
     if (typeof videoId!=='string'||!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new Error('This video does not have a valid 11-character YouTube video ID.');
     if (!sbCategories.some(([id])=>id===category)) throw new Error('Choose a valid SponsorBlock category.');
     if (typeof userId!=='string'||userId.trim().length<16) throw new Error('Local SponsorBlock submitter ID could not be generated.');
@@ -252,7 +263,7 @@
       endTime:Math.round(r.end*1000)/1000,
       category,
       userID:userId.trim(),
-      userAgent:`YouTubeQuickNav/${String(version||'1.47.0').replace(/[^\w.-]/g,'')}`,
+      userAgent:`YouTubeQuickNav/${String(version||'1.47.1').replace(/[^\w.-]/g,'')}`,
       actionType:isPoi?'poi':'skip',
     };
     if (Number.isFinite(duration)&&duration>0) out.videoDuration=Math.round(duration*1000)/1000;
@@ -516,5 +527,5 @@
     const summary=(firstBullet||String(releaseJson.name||'').trim()).slice(0,140);
     return {valid:true,hasUpdate,currentVersion:cleanCur,latestVersion,zipUrl,releaseUrl,summary};
   }
-  globalThis.YqnToolsModel={GITHUB_REPO,compareSemver,parseReleaseUpdate,day,rates,price,estimate,totals,signature,parseTime,range,evidence,answerSchema,validateAnswer,notesMarkdown,normalizeCaptionLines,findActiveCaptionIndex,formatTranscriptQuote,searchTranscript,sbCategories,sponsorBlockPayload,searchAllNotes,allNotesMarkdown,buildBackup,parseBackup,diagnosis};
+  globalThis.YqnToolsModel={GITHUB_REPO,compareSemver,parseReleaseUpdate,day,rates,price,estimate,modelCostWarning,totals,signature,parseTime,range,evidence,answerSchema,validateAnswer,notesMarkdown,normalizeCaptionLines,findActiveCaptionIndex,formatTranscriptQuote,searchTranscript,sbCategories,sponsorBlockPayload,searchAllNotes,allNotesMarkdown,buildBackup,parseBackup,diagnosis};
 })();

@@ -99,7 +99,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
         summary:'Fixture summary',takeaways:['Fixture takeaway'],mentions:[]
       })}]}});
     });
-    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.47.0';
+    let nextRequests=0, transcriptRequests=0, fallbackTranscript=false,nativeTopicFixture=false,longVideoFixture=false,longHeatmapFixture=false,ghReleaseVersion='1.47.1';
     await context.route('https://api.github.com/**', async route => {
       const headers={'access-control-allow-origin':'*','content-type':'application/json'};
       return route.fulfill({status:200,headers,json:{
@@ -1494,7 +1494,7 @@ test('installed extension: playback, preferences, editing, navigation, failures 
       const singleRow=await page.evaluate(()=>{const a=document.querySelector('#yqn-quick-bar .yqn-link-strip').getBoundingClientRect();const b=document.querySelector('#yqn-tools-btn').getBoundingClientRect();return Math.abs(a.top-b.top)<4;});
       assert.equal(singleRow,true,'All 19 toolbar controls fit on a single row at 1120px watch width');
 
-      assert.equal(await popup.locator('#extVersion').textContent(),'v1.47.0');
+      assert.equal(await popup.locator('#extVersion').textContent(),'v1.47.1');
       await popup.locator('#checkUpdatesBtn').click();
       await page.waitForTimeout(50);
       await popup.waitForFunction(()=>!document.querySelector('#updateBanner')?.hidden);
